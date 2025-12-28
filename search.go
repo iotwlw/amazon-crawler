@@ -268,30 +268,6 @@ func (s *searchStruct) get_product_url(doc *goquery.Document) {
 				reviewCount = reviewText
 			}
 
-			brandName := ""
-			brandStoreUrl := ""
-			bylineInfo := g.Find("a[id=bylineInfo]").First()
-			if bylineInfo.Length() > 0 {
-				brandText := strings.TrimSpace(bylineInfo.Text())
-				if strings.Contains(brandText, "Brand:") {
-					brandName = strings.ToLower(strings.TrimSpace(strings.ReplaceAll(brandText, "Brand:", "")))
-				} else if strings.Contains(brandText, "Visit the") && strings.Contains(brandText, "Store") {
-					storeUrl, exists := bylineInfo.Attr("href")
-					if exists {
-						brandStoreUrl = storeUrl
-					}
-					parts := strings.Split(brandText, "Visit the")
-					if len(parts) > 1 {
-						brandPart := strings.Split(parts[1], "Store")
-						if len(brandPart) > 0 {
-							brandName = strings.ToLower(strings.TrimSpace(brandPart[0]))
-						}
-					}
-				} else {
-					brandName = strings.ToLower(brandText)
-				}
-			}
-
 			if err := robot.IsAllow(userAgent, link); err != nil {
 				log.Errorf("此链接不允许访问 关键词:%s %v", s.zh_key, err)
 				return
@@ -307,7 +283,7 @@ func (s *searchStruct) get_product_url(doc *goquery.Document) {
 			if strings.Contains(link, `/dp/`) {
 				link = "/dp/" + strings.Split(link, "/dp/")[1]
 			}
-			s.deal_prouct_url(link, title, boughtCount, price, rating, reviewCount, brandName, brandStoreUrl)
+			s.deal_prouct_url(link, title, boughtCount, price, rating, reviewCount)
 
 		} else {
 			if i != 0 {
@@ -317,7 +293,7 @@ func (s *searchStruct) get_product_url(doc *goquery.Document) {
 
 	})
 }
-func (s *searchStruct) deal_prouct_url(link string, title string, boughtCount string, price string, rating string, reviewCount string, brandName string, brandStoreUrl string) {
+func (s *searchStruct) deal_prouct_url(link string, title string, boughtCount string, price string, rating string, reviewCount string) {
 	if !strings.Contains(link, "/ref=") || strings.HasPrefix(link, "https://") {
 		log.Errorf("非预设的链接跳过此链接:%s", link)
 		return
@@ -328,7 +304,7 @@ func (s *searchStruct) deal_prouct_url(link string, title string, boughtCount st
 	if strings.Contains(url[0], "/dp/") {
 		asin = strings.Split(url[0], "/dp/")[1]
 	}
-	_, err := app.db.Exec(`INSERT INTO amc_product(url,param,title,asin,keyword,bought_count,price,rating,review_count,brand_name,brand_store_url) values(?,?,?,?,?,?,?,?,?,?,?)`, url[0], "/ref="+url[1], title, asin, s.en_key, boughtCount, price, rating, reviewCount, brandName, brandStoreUrl)
+	_, err := app.db.Exec(`INSERT INTO amc_product(url,param,title,asin,keyword,bought_count,price,rating,review_count) values(?,?,?,?,?,?,?,?,?)`, url[0], "/ref="+url[1], title, asin, s.en_key, boughtCount, price, rating, reviewCount)
 
 	link = fmt.Sprintf("https://%s%s", app.Domain, link)
 	if is_duplicate_entry(err) {
@@ -340,6 +316,6 @@ func (s *searchStruct) deal_prouct_url(link string, title string, boughtCount st
 		return
 	}
 
-	log.Infof("商品插入成功 关键词:%s 链接:%s 标题:%s ASIN:%s 购买数量:%s 价格:%s 星级:%s 评分数量:%s 品牌名称:%s 旗舰店链接:%s", s.en_key, link, title, asin, boughtCount, price, rating, reviewCount, brandName, brandStoreUrl)
+	log.Infof("商品插入成功 关键词:%s 链接:%s 标题:%s ASIN:%s 购买数量:%s 价格:%s 星级:%s 评分数量:%s", s.en_key, link, title, asin, boughtCount, price, rating, reviewCount)
 	s.valid += 1
 }
