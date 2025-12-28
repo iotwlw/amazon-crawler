@@ -223,12 +223,12 @@ func (product *productStruct) request(url string) error {
 	return nil
 }
 func (product *productStruct) get_seller_id() string {
+	product.id = ""
 	for _, j := range strings.Split(product.url, "&") {
 		if strings.HasPrefix(j, "seller=") {
 			product.id = strings.Split(j, "seller=")[1]
 		}
 	}
-	// if ( product.id=="")
 	return product.id
 }
 func (product *productStruct) insert_selll_id() error {

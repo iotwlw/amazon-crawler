@@ -20,6 +20,10 @@ type sellerStruct struct {
 	primary_id   string
 	trn_status   int
 	all_status   int
+	fb_1month    int
+	fb_3month    int
+	fb_12month   int
+	fb_lifetime  int
 }
 
 const MYSQL_SELLER_STATUS_TRN_OK int = 1
@@ -178,6 +182,61 @@ func (seller *sellerStruct) request() error {
 
 	sellerTxt := doc.Find("div#page-section-detail-seller-info").Find("span").Text()
 
+	fbSummary := doc.Find("div#seller-feedback-summary-rating").First()
+	if fbSummary.Length() > 0 {
+		log.Infof("找到 FB 摘要元素")
+
+		thirtyElement := fbSummary.Find("div#rating-thirty").First()
+		if thirtyElement.Length() > 0 {
+			countText := thirtyElement.Find("span.ratings-reviews-count").First().Text()
+			countText = strings.ReplaceAll(countText, ",", "")
+			var count int
+			_, err := fmt.Sscanf(countText, "%d", &count)
+			if err == nil {
+				seller.fb_1month = count
+				log.Infof("提取到 1 month FB: %d", count)
+			}
+		}
+
+		ninetyElement := fbSummary.Find("div#rating-ninety").First()
+		if ninetyElement.Length() > 0 {
+			countText := ninetyElement.Find("span.ratings-reviews-count").First().Text()
+			countText = strings.ReplaceAll(countText, ",", "")
+			var count int
+			_, err := fmt.Sscanf(countText, "%d", &count)
+			if err == nil {
+				seller.fb_3month = count
+				log.Infof("提取到 3 months FB: %d", count)
+			}
+		}
+
+		yearElement := fbSummary.Find("div#rating-year").First()
+		if yearElement.Length() > 0 {
+			countText := yearElement.Find("span.ratings-reviews-count").First().Text()
+			countText = strings.ReplaceAll(countText, ",", "")
+			var count int
+			_, err := fmt.Sscanf(countText, "%d", &count)
+			if err == nil {
+				seller.fb_12month = count
+				log.Infof("提取到 12 months FB: %d", count)
+			}
+		}
+
+		lifetimeElement := fbSummary.Find("div#rating-lifetime").First()
+		if lifetimeElement.Length() > 0 {
+			countText := lifetimeElement.Find("span.ratings-reviews-count").First().Text()
+			countText = strings.ReplaceAll(countText, ",", "")
+			var count int
+			_, err := fmt.Sscanf(countText, "%d", &count)
+			if err == nil {
+				seller.fb_lifetime = count
+				log.Infof("提取到 Lifetime FB: %d", count)
+			}
+		}
+	} else {
+		log.Warn("未找到 FB 摘要元素")
+	}
+
 	seller.all_status = MYSQL_SELLER_STATUS_INFO_OK
 	var info []string
 
@@ -275,6 +334,6 @@ func (seller *sellerStruct) nameCheck() {
 	log.Infof("查找结果 商家名称: %s", seller.businessName)
 }
 func (seller *sellerStruct) update() error {
-	_, err := app.db.Exec("update amc_seller set trn_status=?,trn=?,name=?,address=?,all_status=? where id=? and app_id=?", seller.trn_status, seller.trn, seller.businessName, seller.address, seller.all_status, seller.primary_id, app.Basic.App_id)
+	_, err := app.db.Exec("update amc_seller set trn_status=?,trn=?,name=?,address=?,all_status=?,fb_1month=?,fb_3month=?,fb_12month=?,fb_lifetime=? where id=? and app_id=?", seller.trn_status, seller.trn, seller.businessName, seller.address, seller.all_status, seller.fb_1month, seller.fb_3month, seller.fb_12month, seller.fb_lifetime, seller.primary_id, app.Basic.App_id)
 	return err
 }

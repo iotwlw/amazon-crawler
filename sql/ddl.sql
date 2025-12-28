@@ -234,6 +234,10 @@ CREATE TABLE `amc_seller` (
   `all_status` tinyint(1) DEFAULT '0',
   `app_id` tinyint(1) DEFAULT '0',
   `company_id` char(16) DEFAULT NULL,
+  `fb_1month` int(11) NOT NULL DEFAULT '0',
+  `fb_3month` int(11) NOT NULL DEFAULT '0',
+  `fb_12month` int(11) NOT NULL DEFAULT '0',
+  `fb_lifetime` int(11) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`),
   UNIQUE KEY `seller_id_UNIQUE` (`seller_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=115634 DEFAULT CHARSET=utf8;
