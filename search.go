@@ -55,7 +55,7 @@ func (s *searchStruct) main() error {
 		log.Infof("------------------------")
 	}
 	s.start = 1
-	s.end = 10
+	s.end = 2 // 为了适应亚马逊系统，这里只搜索首页，
 	for row.Next() {
 		s.valid = 0
 		row.Scan(&s.category_id, &s.zh_key, &s.en_key)

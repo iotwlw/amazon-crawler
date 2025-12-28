@@ -176,7 +176,7 @@ DROP TABLE IF EXISTS `product`;
 CREATE TABLE `product` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `url` varchar(200) NOT NULL,
-  `param` varchar(400) NOT NULL,
+  `param` varchar(1000) NOT NULL,
   `status` tinyint(1) DEFAULT '0',
   `app` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`),
