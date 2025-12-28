@@ -1,7 +1,7 @@
 
 -- MySQL dump 10.13  Distrib 5.7.35, for Linux (x86_64)
 --
--- Host: localhost    Database: amazon
+-- Host: localhost    Database: taotie
 -- ------------------------------------------------------
 -- Server version	5.7.35-log
 
@@ -17,12 +17,12 @@
 /*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
 
 --
--- Current Database: `amazon`
+-- Current Database: `taotie`
 --
 
-CREATE DATABASE /*!32312 IF NOT EXISTS*/ `amazon` /*!40100 DEFAULT CHARACTER SET utf8mb4 */;
+CREATE DATABASE /*!32312 IF NOT EXISTS*/ `taotie` /*!40100 DEFAULT CHARACTER SET utf8mb4 */;
 
-USE `amazon`;
+USE `taotie`;
 
 --
 -- Temporary table structure for view `产品检查表`
@@ -240,10 +240,10 @@ CREATE TABLE `amc_seller` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Current Database: `amazon`
+-- Current Database: `taotie`
 --
 
-USE `amazon`;
+USE `taotie`;
 
 --
 -- Final view structure for view `产品检查表`
@@ -257,7 +257,7 @@ USE `amazon`;
 /*!50001 SET character_set_results     = utf8mb4 */;
 /*!50001 SET collation_connection      = utf8mb4_general_ci */;
 /*!50001 CREATE ALGORITHM=UNDEFINED */
-/*!50013 DEFINER=`amazon`@`%` SQL SECURITY DEFINER */
+/*!50013 DEFINER=`taotie`@`%` SQL SECURITY DEFINER */
 /*!50001 VIEW `产品检查表` AS select (case when (`amc_product`.`status` = 0) then '未搜索' when (`amc_product`.`status` = 1) then '准备检查' when (`amc_product`.`status` = 2) then '检查结束' when (`amc_product`.`status` = 3) then '其他错误' when (`amc_product`.`status` = 4) then '没有商家' else `amc_product`.`status` end) AS `状态`,count(0) AS `链接数量` from `amc_product` group by `amc_product`.`status` */;
 /*!50001 SET character_set_client      = @saved_cs_client */;
 /*!50001 SET character_set_results     = @saved_cs_results */;
@@ -275,7 +275,7 @@ USE `amazon`;
 /*!50001 SET character_set_results     = utf8mb4 */;
 /*!50001 SET collation_connection      = utf8mb4_general_ci */;
 /*!50001 CREATE ALGORITHM=UNDEFINED */
-/*!50013 DEFINER=`amazon`@`%` SQL SECURITY DEFINER */
+/*!50013 DEFINER=`taotie`@`%` SQL SECURITY DEFINER */
 /*!50001 VIEW `占用空间表` AS select `information_schema`.`tables`.`TABLE_SCHEMA` AS `Database`,((sum((`information_schema`.`tables`.`DATA_LENGTH` + `information_schema`.`tables`.`INDEX_LENGTH`)) / 1024) / 1024) AS `Size (MB)` from `information_schema`.`tables` group by `information_schema`.`tables`.`TABLE_SCHEMA` */;
 /*!50001 SET character_set_client      = @saved_cs_client */;
 /*!50001 SET character_set_results     = @saved_cs_results */;
@@ -293,7 +293,7 @@ USE `amazon`;
 /*!50001 SET character_set_results     = utf8mb4 */;
 /*!50001 SET collation_connection      = utf8mb4_general_ci */;
 /*!50001 CREATE ALGORITHM=UNDEFINED */
-/*!50013 DEFINER=`amazon`@`%` SQL SECURITY DEFINER */
+/*!50013 DEFINER=`taotie`@`%` SQL SECURITY DEFINER */
 /*!50001 VIEW `商家信息表` AS select `amc_seller`.`seller_id` AS `商家ID`,`amc_seller`.`name` AS `名称`,`amc_seller`.`address` AS `地址`,`amc_seller`.`trn` AS `税号`,(case `amc_seller`.`trn_status` when 0 then 'TRN未查找' when 1 then '中国TRN' when 2 then '空TRN' when 3 then '其他TRN' when 4 then '异常TRN' end) AS `税号标识`,(case `amc_seller`.`all_status` when 0 then '未查找' when 1 then '信息完整' when 2 then '没有名称' when 3 then '没有地址' when 4 then '没有TRN' end) AS `信息标识` from `amc_seller` */;
 /*!50001 SET character_set_client      = @saved_cs_client */;
 /*!50001 SET character_set_results     = @saved_cs_results */;
@@ -311,7 +311,7 @@ USE `amazon`;
 /*!50001 SET character_set_results     = utf8mb4 */;
 /*!50001 SET collation_connection      = utf8mb4_general_ci */;
 /*!50001 CREATE ALGORITHM=UNDEFINED */
-/*!50013 DEFINER=`amazon`@`%` SQL SECURITY DEFINER */
+/*!50013 DEFINER=`taotie`@`%` SQL SECURITY DEFINER */
 /*!50001 VIEW `商家trn表` AS select (case `amc_seller`.`trn_status` when 0 then 'TRN未查找' when 1 then '中国TRN' when 2 then '空TRN' when 3 then '其他TRN' when 4 then '异常TRN' end) AS `数量`,count(0) AS `count(*)` from `amc_seller` group by `amc_seller`.`trn_status` */;
 /*!50001 SET character_set_client      = @saved_cs_client */;
 /*!50001 SET character_set_results     = @saved_cs_results */;
@@ -329,8 +329,8 @@ USE `amazon`;
 /*!50001 SET character_set_results     = utf8mb4 */;
 /*!50001 SET collation_connection      = utf8mb4_general_ci */;
 /*!50001 CREATE ALGORITHM=UNDEFINED */
-/*!50013 DEFINER=`amazon`@`%` SQL SECURITY DEFINER */
-/*!50001 VIEW `搜索统计表` AS select `k`.`zh_key` AS `中文关键词`,count(0) AS `搜索次数`,sum(`s`.`valid`) AS `产品数` from (`amazon`.`amc_search_statistics` `s` join (select `amazon`.`amc_category`.`id` AS `id`,`amazon`.`amc_category`.`zh_key` AS `zh_key` from `amazon`.`amc_category`) `k` on((`s`.`category_id` = `k`.`id`))) group by `s`.`category_id` */;
+/*!50013 DEFINER=`taotie`@`%` SQL SECURITY DEFINER */
+/*!50001 VIEW `搜索统计表` AS select `k`.`zh_key` AS `中文关键词`,count(0) AS `搜索次数`,sum(`s`.`valid`) AS `产品数` from (`taotie`.`amc_search_statistics` `s` join (select `taotie`.`amc_category`.`id` AS `id`,`taotie`.`amc_category`.`zh_key` AS `zh_key` from `taotie`.`amc_category`) `k` on((`s`.`category_id` = `k`.`id`))) group by `s`.`category_id` */;
 /*!50001 SET character_set_client      = @saved_cs_client */;
 /*!50001 SET character_set_results     = @saved_cs_results */;
 /*!50001 SET collation_connection      = @saved_col_connection */;
@@ -347,7 +347,7 @@ USE `amazon`;
 /*!50001 SET character_set_results     = utf8mb4 */;
 /*!50001 SET collation_connection      = utf8mb4_general_ci */;
 /*!50001 CREATE ALGORITHM=UNDEFINED */
-/*!50013 DEFINER=`amazon`@`%` SQL SECURITY DEFINER */
+/*!50013 DEFINER=`taotie`@`%` SQL SECURITY DEFINER */
 /*!50001 VIEW `程序状态表` AS select `amc_application`.`app_id` AS `app_id`,(case when (`amc_application`.`status` = 0) then '启动中' when (`amc_application`.`status` = 1) then '结束' when (`amc_application`.`status` = 2) then '1.搜索页面中' when (`amc_application`.`status` = 3) then '2.查找商家中' when (`amc_application`.`status` = 4) then '3.确定TRN中' end) AS `状态`,`amc_application`.`update` AS `更新时间` from `amc_application` order by `amc_application`.`update` desc */;
 /*!50001 SET character_set_client      = @saved_cs_client */;
 /*!50001 SET character_set_results     = @saved_cs_results */;
@@ -365,7 +365,7 @@ USE `amazon`;
 /*!50001 SET character_set_results     = utf8mb4 */;
 /*!50001 SET collation_connection      = utf8mb4_general_ci */;
 /*!50001 CREATE ALGORITHM=UNDEFINED */
-/*!50013 DEFINER=`amazon`@`%` SQL SECURITY DEFINER */
+/*!50013 DEFINER=`taotie`@`%` SQL SECURITY DEFINER */
 /*!50001 VIEW `类别总数表` AS select count(0) AS `类别总数` from `amc_category` */;
 /*!50001 SET character_set_client      = @saved_cs_client */;
 /*!50001 SET character_set_results     = @saved_cs_results */;

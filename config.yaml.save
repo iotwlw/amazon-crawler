@@ -66,4 +66,4 @@ mysql:
   port: "3306"
   username: 
   password: 
-  database: "amazon"
+  database: "taotie"
