@@ -129,8 +129,8 @@ func (s *searchStruct) set_en_key() string {
 	return strings.ReplaceAll(strings.ReplaceAll(s.en_key, " ", "+"), "'", "%27")
 }
 func (s *searchStruct) request(seq int) (*goquery.Document, error) {
-	url := fmt.Sprintf("https://%s/s?k=%s&page=%d&crid=2V9436DZJ6IJF&qid=1699839233&sprefix=clothe%%2Caps%%2C552&ref=sr_pg_2", app.Domain, s.en_key, seq)
-
+	url := fmt.Sprintf("https://%s/s?k=%s&page=%d&dc&crid=2V9436DZJ6IJF&qid=1699839233&sprefix=clothe%%2Caps%%2C552&ref=sr_pg_2", app.Domain, s.en_key, seq)
+	// 链接增加 &dc 表示直接搜索，避免转移到其他关键词
 	err := robot.IsAllow(userAgent, url)
 	if err != nil {
 		return nil, err
@@ -220,7 +220,53 @@ func (s *searchStruct) get_product_url(doc *goquery.Document) {
 		if exist {
 			link, _ = url.QueryUnescape(link)
 
-			// log.Infof("找到商品项中的链接 关键词:%s 页面商品序号:%d 商品原始链接: %s ", s.zh_key, i, link)
+			title := ""
+			titleElement := g.Find("h2").First()
+			if titleElement.Length() > 0 {
+				title = strings.TrimSpace(titleElement.Text())
+			}
+
+			boughtCount := ""
+			boughtSpan := g.Find("span.a-size-base.a-color-secondary").FilterFunction(func(i int, s *goquery.Selection) bool {
+				text := strings.TrimSpace(s.Text())
+				return strings.Contains(text, "bought in past month")
+			})
+			if boughtSpan.Length() > 0 {
+				boughtText := strings.TrimSpace(boughtSpan.First().Text())
+				parts := strings.Split(boughtText, "+")
+				if len(parts) > 0 {
+					boughtCount = strings.TrimSpace(parts[0])
+				}
+			} else {
+				return
+			}
+
+			price := ""
+			priceSpan := g.Find("span.a-price[data-a-size=xl]").First()
+			if priceSpan.Length() > 0 {
+				priceWhole := priceSpan.Find("span.a-price-whole").First().Text()
+				priceFraction := priceSpan.Find("span.a-price-fraction").First().Text()
+				if priceWhole != "" {
+					price = priceWhole
+					if priceFraction != "" {
+						price = price + "." + priceFraction
+					}
+				}
+			}
+
+			rating := ""
+			ratingSpan := g.Find("span.a-size-small.a-color-base[aria-hidden=true]").First()
+			if ratingSpan.Length() > 0 {
+				rating = strings.TrimSpace(ratingSpan.Text())
+			}
+
+			reviewCount := ""
+			reviewSpan := g.Find("span.a-size-mini.puis-normal-weight-text.s-underline-text[aria-hidden=true]").First()
+			if reviewSpan.Length() > 0 {
+				reviewText := strings.TrimSpace(reviewSpan.Text())
+				reviewText = strings.Trim(reviewText, "()")
+				reviewCount = reviewText
+			}
 
 			if err := robot.IsAllow(userAgent, link); err != nil {
 				log.Errorf("此链接不允许访问 关键词:%s %v", s.zh_key, err)
@@ -229,16 +275,15 @@ func (s *searchStruct) get_product_url(doc *goquery.Document) {
 
 			if strings.HasPrefix(link, "/gp/") || strings.Contains(link, `javascript:void(0)`) {
 				link = fmt.Sprintf("https://%s%s", app.Domain, link)
-				log.Warnf("非预设的链接跳过此链接 关键词:%s 捕获链接:%s", s.zh_key, link)
+				// log.Warnf("非预设的链接跳过此链接 关键词:%s 捕获链接:%s", s.zh_key, link)
 			} else if strings.HasPrefix(link, "https://aax-") {
-				log.Warnf("非预设的链接跳过此链接 关键词:%s 捕获链接:%s", s.zh_key, link)
+				// log.Warnf("非预设的链接跳过此链接 关键词:%s 捕获链接:%s", s.zh_key, link)
 				return
 			}
 			if strings.Contains(link, `/dp/`) {
 				link = "/dp/" + strings.Split(link, "/dp/")[1]
 			}
-			// log.Infof("找到商品项中的链接 关键词:%s 处理后的商品链接:%s", s.zh_key, fmt.Sprintf("https://%s%s", app.Domain, link))
-			s.deal_prouct_url(link)
+			s.deal_prouct_url(link, title, boughtCount, price, rating, reviewCount)
 
 		} else {
 			if i != 0 {
@@ -248,26 +293,30 @@ func (s *searchStruct) get_product_url(doc *goquery.Document) {
 
 	})
 }
-func (s *searchStruct) deal_prouct_url(link string) {
+func (s *searchStruct) deal_prouct_url(link string, title string, boughtCount string, price string, rating string, reviewCount string) {
 	if !strings.Contains(link, "/ref=") || strings.HasPrefix(link, "https://") {
 		log.Errorf("非预设的链接跳过此链接:%s", link)
 		return
 	}
 	url := strings.Split(link, "/ref=")
 
-	// log.Infof("找到商品 关键词:%s 链接:%s 商品ID的url:%s 商品参数的url:%s ", s.zh_key, link, url[0], product_param)
-	_, err := app.db.Exec(`INSERT INTO product(url,param) values(?,?)`, url[0], "/ref="+url[1])
+	asin := ""
+	if strings.Contains(url[0], "/dp/") {
+		asin = strings.Split(url[0], "/dp/")[1]
+	}
+
+	_, err := app.db.Exec(`INSERT INTO product(url,param,title,asin,keyword,bought_count,price,rating,review_count) values(?,?,?,?,?,?,?,?,?)`, url[0], "/ref="+url[1], title, asin, s.en_key, boughtCount, price, rating, reviewCount)
 
 	link = fmt.Sprintf("https://%s%s", app.Domain, link)
 	if is_duplicate_entry(err) {
-		log.Infof("商品已存在 关键词:%s 链接:%s ", s.zh_key, link)
+		log.Infof("商品已存在 关键词:%s 链接:%s ", s.en_key, link)
 		return
 	}
 	if err != nil {
-		log.Errorf("商品插入失败 关键词:%s 链接:%s %v ", s.zh_key, link, err)
+		log.Errorf("商品插入失败 关键词:%s 链接:%s %v ", s.en_key, link, err)
 		return
 	}
 
-	log.Infof("商品插入成功 关键词:%s 链接:%s ", s.zh_key, link)
+	log.Infof("商品插入成功 关键词:%s 链接:%s 标题:%s ASIN:%s 购买数量:%s 价格:%s 星级:%s 评分数量:%s", s.en_key, link, title, asin, boughtCount, price, rating, reviewCount)
 	s.valid += 1
 }
