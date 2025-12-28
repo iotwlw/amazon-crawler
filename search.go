@@ -305,7 +305,7 @@ func (s *searchStruct) deal_prouct_url(link string, title string, boughtCount st
 		asin = strings.Split(url[0], "/dp/")[1]
 	}
 
-	_, err := app.db.Exec(`INSERT INTO product(url,param,title,asin,keyword,bought_count,price,rating,review_count) values(?,?,?,?,?,?,?,?,?)`, url[0], "/ref="+url[1], title, asin, s.en_key, boughtCount, price, rating, reviewCount)
+	_, err := app.db.Exec(`INSERT INTO product(url,param,title,asin,keyword,bought_count,price,rating,review_count,status) values(?,?,?,?,?,?,?,?,?)`, url[0], "/ref="+url[1], title, asin, s.en_key, boughtCount, price, rating, reviewCount, MYSQL_PRODUCT_STATUS_FROM_SEARCH)
 
 	link = fmt.Sprintf("https://%s%s", app.Domain, link)
 	if is_duplicate_entry(err) {

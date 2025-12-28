@@ -22,6 +22,7 @@ const MYSQL_PRODUCT_STATUS_CHEKCK int = 1
 const MYSQL_PRODUCT_STATUS_OVER int = 2
 const MYSQL_PRODUCT_STATUS_ERROR_OVER int = 3
 const MYSQL_PRODUCT_STATUS_NO_PRODUCT int = 4
+const MYSQL_PRODUCT_STATUS_FROM_SEARCH int = 5 // 从搜索页获取的产品暂时不做查询
 
 func (product *productStruct) main() error {
 	if !app.Exec.Enable.Product {
