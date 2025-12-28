@@ -10,11 +10,13 @@ import (
 )
 
 type productStruct struct {
-	// 产品页的商家页面链接
 	url string
 
-	// 产品页的商家ID
 	id string
+
+	brand_name string
+
+	brand_store_url string
 }
 
 const MYSQL_PRODUCT_STATUS_INSERT int = 0
@@ -57,6 +59,8 @@ func (product *productStruct) main() error {
 	}
 	for row.Next() {
 		product.id = ""
+		product.brand_name = ""
+		product.brand_store_url = ""
 		var primary_id int64
 		var url, param string
 		if err := row.Scan(&primary_id, &url, &param); err != nil {
@@ -76,15 +80,15 @@ func (product *productStruct) main() error {
 		err := product.request(url)
 		if err != nil {
 			if err == ERROR_NOT_SELLER_URL {
-				product.update_status(primary_id, MYSQL_PRODUCT_STATUS_NO_PRODUCT)
+				product.update_status(primary_id, MYSQL_PRODUCT_STATUS_NO_PRODUCT, "", "", "")
 				continue
 			} else if err == ERROR_NOT_404 || err == ERROR_NOT_503 || err == ERROR_VERIFICATION {
-				product.update_status(primary_id, MYSQL_PRODUCT_STATUS_ERROR_OVER)
+				product.update_status(primary_id, MYSQL_PRODUCT_STATUS_ERROR_OVER, "", "", "")
 				log.Error(err)
 				sleep(300)
 				continue
 			} else {
-				product.update_status(primary_id, MYSQL_PRODUCT_STATUS_ERROR_OVER)
+				product.update_status(primary_id, MYSQL_PRODUCT_STATUS_ERROR_OVER, "", "", "")
 				log.Error(err)
 				sleep(300)
 				continue
@@ -103,7 +107,7 @@ func (product *productStruct) main() error {
 			log.Error(err)
 			continue
 		}
-		if err := product.update_status(primary_id, MYSQL_PRODUCT_STATUS_OVER); err != nil {
+		if err := product.update_status(primary_id, MYSQL_PRODUCT_STATUS_OVER, product.id, product.brand_name, product.brand_store_url); err != nil {
 			log.Error(err)
 			continue
 		}
@@ -176,6 +180,31 @@ func (product *productStruct) request(url string) error {
 
 	product.url = url
 
+	bylineInfo := doc.Find("a[id=bylineInfo]").First()
+	if bylineInfo.Length() > 0 {
+		brandText := strings.TrimSpace(bylineInfo.Text())
+		if strings.Contains(brandText, "Brand:") {
+			product.brand_name = strings.TrimSpace(strings.ReplaceAll(brandText, "Brand:", ""))
+		} else if strings.Contains(brandText, "Visit the") && strings.Contains(brandText, "Store") {
+			storeUrl, exists := bylineInfo.Attr("href")
+			if exists {
+				product.brand_store_url = storeUrl
+				log.Infof("提取到旗舰店链接:%s", product.brand_store_url)
+			}
+			parts := strings.Split(brandText, "Visit the")
+			if len(parts) > 1 {
+				brandPart := strings.Split(parts[1], "Store")
+				if len(brandPart) > 0 {
+					product.brand_name = strings.TrimSpace(brandPart[0])
+				}
+			}
+		} else {
+			product.brand_name = brandText
+		}
+		product.brand_name = strings.ToLower(product.brand_name)
+		log.Infof("提取到品牌名称:%s", product.brand_name)
+	}
+
 	return nil
 }
 func (product *productStruct) get_seller_id() string {
@@ -192,12 +221,21 @@ func (product *productStruct) insert_selll_id() error {
 	return err
 }
 
-func (product *productStruct) update_status(id int64, s int) error {
-	_, err := app.db.Exec("UPDATE product SET status = ? ,app = ? WHERE id = ?", s, app.Basic.App_id, id)
-	if err != nil {
-		log.Infof("更新product表状态失败 ID:%d app:%d 状态:%d", id, app.Basic.App_id, s)
-		return err
+func (product *productStruct) update_status(id int64, s int, seller_id string, brand_name string, brand_store_url string) error {
+	if seller_id != "" || brand_name != "" || brand_store_url != "" {
+		_, err := app.db.Exec("UPDATE product SET status = ?, app = ?, seller_id = ?, brand_name = ?, brand_store_url = ? WHERE id = ?", s, app.Basic.App_id, seller_id, brand_name, brand_store_url, id)
+		if err != nil {
+			log.Infof("更新product表状态失败 ID:%d app:%d 状态:%d seller_id:%s brand_name:%s brand_store_url:%s", id, app.Basic.App_id, s, seller_id, brand_name, brand_store_url)
+			return err
+		}
+		log.Infof("更新product表状态成功 ID:%d 状态:%d app:%d seller_id:%s brand_name:%s brand_store_url:%s", id, s, app.Basic.App_id, seller_id, brand_name, brand_store_url)
+	} else {
+		_, err := app.db.Exec("UPDATE product SET status = ?, app = ? WHERE id = ?", s, app.Basic.App_id, id)
+		if err != nil {
+			log.Infof("更新product表状态失败 ID:%d app:%d 状态:%d", id, app.Basic.App_id, s)
+			return err
+		}
+		log.Infof("更新product表状态成功 ID:%d 状态:%d app:%d", id, s, app.Basic.App_id)
 	}
-	log.Infof("更新product表状态成功 ID:%d 状态:%d app:%d ", id, s, app.Basic.App_id)
 	return nil
 }
