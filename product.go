@@ -17,6 +17,10 @@ type productStruct struct {
 	brand_name string
 
 	brand_store_url string
+
+	keyword string
+
+	seller_name string
 }
 
 const MYSQL_PRODUCT_STATUS_INSERT int = 0
@@ -52,7 +56,7 @@ func (product *productStruct) main() error {
 		return err
 	}
 
-	row, err := app.db.Query(`select id,url,param from amc_product where status=? and app = ?`, MYSQL_PRODUCT_STATUS_CHEKCK, app.Basic.App_id)
+	row, err := app.db.Query(`select id,url,param,keyword from amc_product where status=? and app = ?`, MYSQL_PRODUCT_STATUS_CHEKCK, app.Basic.App_id)
 	if err != nil {
 		log.Errorf("查询product表失败,%v", err)
 		return err
@@ -61,12 +65,15 @@ func (product *productStruct) main() error {
 		product.id = ""
 		product.brand_name = ""
 		product.brand_store_url = ""
+		product.keyword = ""
+		product.seller_name = ""
 		var primary_id int64
-		var url, param string
-		if err := row.Scan(&primary_id, &url, &param); err != nil {
+		var url, param, keyword string
+		if err := row.Scan(&primary_id, &url, &param, &keyword); err != nil {
 			log.Errorf("获取product表的值失败,%v", err)
 			continue
 		}
+		product.keyword = keyword
 		if strings.HasPrefix(url, "http") {
 			continue
 		}
@@ -98,14 +105,16 @@ func (product *productStruct) main() error {
 
 		product.get_seller_id()
 
-		err = product.insert_selll_id()
-		if is_duplicate_entry(err) {
-			log.Infof("店铺已存在 商家ID:%s", product.id)
-			err = nil
-		}
-		if err != nil {
-			log.Error(err)
-			continue
+		if strings.ToLower(product.keyword) == strings.ToLower(product.brand_name) {
+			err = product.insert_selll_id()
+			if is_duplicate_entry(err) {
+				log.Infof("店铺已存在 商家ID:%s", product.id)
+				err = nil
+			}
+			if err != nil {
+				log.Error(err)
+				continue
+			}
 		}
 		if err := product.update_status(primary_id, MYSQL_PRODUCT_STATUS_OVER, product.id, product.brand_name, product.brand_store_url); err != nil {
 			log.Error(err)
@@ -180,6 +189,12 @@ func (product *productStruct) request(url string) error {
 
 	product.url = url
 
+	sellerName := strings.TrimSpace(res.Text())
+	if sellerName != "" {
+		product.seller_name = sellerName
+		log.Infof("提取到卖家名称:%s", product.seller_name)
+	}
+
 	bylineInfo := doc.Find("a[id=bylineInfo]").First()
 	if bylineInfo.Length() > 0 {
 		brandText := strings.TrimSpace(bylineInfo.Text())
@@ -217,7 +232,7 @@ func (product *productStruct) get_seller_id() string {
 	return product.id
 }
 func (product *productStruct) insert_selll_id() error {
-	_, err := app.db.Exec("insert into amc_seller (seller_id,app_id) values(?,?)", product.id, 0)
+	_, err := app.db.Exec("insert into amc_seller (seller_id,seller_name,keyword,app_id) values(?,?,?,?)", product.id, product.seller_name, product.keyword, 0)
 	return err
 }
 
