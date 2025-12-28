@@ -223,6 +223,8 @@ CREATE TABLE `seller` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `seller_id` varchar(25) NOT NULL,
   `name` varchar(200) DEFAULT NULL,
+  `seller_name` varchar(200) DEFAULT NULL,
+  `keyword` varchar(100) DEFAULT NULL,
   `address` varchar(200) DEFAULT NULL,
   `trn` varchar(28) DEFAULT NULL,
   `trn_status` tinyint(1) NOT NULL DEFAULT '0',
