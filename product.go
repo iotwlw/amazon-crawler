@@ -62,18 +62,12 @@ func (product *productStruct) main() error {
 		return err
 	}
 	for row.Next() {
-		product.id = ""
-		product.brand_name = ""
-		product.brand_store_url = ""
-		product.keyword = ""
-		product.seller_name = ""
 		var primary_id int64
 		var url, param, keyword string
 		if err := row.Scan(&primary_id, &url, &param, &keyword); err != nil {
 			log.Errorf("获取product表的值失败,%v", err)
 			continue
 		}
-		product.keyword = keyword
 		if strings.HasPrefix(url, "http") {
 			continue
 		}
@@ -103,12 +97,23 @@ func (product *productStruct) main() error {
 			}
 		}
 
-		product.get_seller_id()
+		// 立即保存当前商品的 seller_id 和其他信息，避免被下一个循环覆盖
+		currentSellerID := product.get_seller_id()
+		currentBrandName := product.brand_name
+		currentBrandStoreURL := product.brand_store_url
+		currentSellerName := product.seller_name
+		currentKeyword := keyword
 
-		if strings.ToLower(product.keyword) == strings.ToLower(product.brand_name) {
-			err = product.insert_selll_id()
+		if currentSellerID == "" && currentBrandName == "" {
+			// 如果没有找到 seller_id 和 brand_name，标记为无商家
+			product.update_status(primary_id, MYSQL_PRODUCT_STATUS_NO_PRODUCT, "", "", "")
+			continue
+		}
+
+		if strings.ToLower(currentKeyword) == strings.ToLower(currentBrandName) && currentSellerID != "" {
+			err = product.insert_selll_id(currentSellerID, currentSellerName, currentKeyword)
 			if is_duplicate_entry(err) {
-				log.Infof("店铺已存在 商家ID:%s", product.id)
+				log.Infof("店铺已存在 商家ID:%s", currentSellerID)
 				err = nil
 			}
 			if err != nil {
@@ -116,7 +121,7 @@ func (product *productStruct) main() error {
 				continue
 			}
 		}
-		if err := product.update_status(primary_id, MYSQL_PRODUCT_STATUS_OVER, product.id, product.brand_name, product.brand_store_url); err != nil {
+		if err := product.update_status(primary_id, MYSQL_PRODUCT_STATUS_OVER, currentSellerID, currentBrandName, currentBrandStoreURL); err != nil {
 			log.Error(err)
 			continue
 		}
@@ -222,17 +227,19 @@ func (product *productStruct) request(url string) error {
 
 	return nil
 }
+// get_seller_id 从 URL 中提取 seller ID
 func (product *productStruct) get_seller_id() string {
-	product.id = ""
 	for _, j := range strings.Split(product.url, "&") {
 		if strings.HasPrefix(j, "seller=") {
-			product.id = strings.Split(j, "seller=")[1]
+			return strings.Split(j, "seller=")[1]
 		}
 	}
-	return product.id
+	return ""
 }
-func (product *productStruct) insert_selll_id() error {
-	_, err := app.db.Exec("insert into amc_seller (seller_id,seller_name,keyword,app_id) values(?,?,?,?)", product.id, product.seller_name, product.keyword, 0)
+
+// insert_selll_id 插入卖家信息到数据库
+func (product *productStruct) insert_selll_id(sellerID, sellerName, keyword string) error {
+	_, err := app.db.Exec("insert into amc_seller (seller_id,seller_name,keyword,app_id) values(?,?,?,?)", sellerID, sellerName, keyword, 0)
 	return err
 }
 
