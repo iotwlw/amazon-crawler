@@ -24,6 +24,8 @@ type sellerStruct struct {
 	fb_3month    int
 	fb_12month   int
 	fb_lifetime  int
+	seller_name  string
+	keyword      string
 }
 
 const MYSQL_SELLER_STATUS_TRN_OK int = 1
@@ -78,7 +80,7 @@ func (seller *sellerStruct) main() error {
 		return err
 	}
 
-	row, err := app.db.Query("select id,seller_id from amc_seller where all_status =? and app_id=?", MYSQL_SELLER_STATUS_INFO_INSERT, app.Basic.App_id)
+	row, err := app.db.Query("select id,seller_id,seller_name,keyword from amc_seller where all_status =? and app_id=?", MYSQL_SELLER_STATUS_INFO_INSERT, app.Basic.App_id)
 	switch err {
 	case nil:
 		break
@@ -91,7 +93,17 @@ func (seller *sellerStruct) main() error {
 
 	}
 	for row.Next() {
-		if err := row.Scan(&seller.primary_id, &seller.seller_id); err != nil {
+		seller.seller_name = ""
+		seller.keyword = ""
+		seller.businessName = ""
+		seller.address = ""
+		seller.trn = ""
+		seller.fb_1month = 0
+		seller.fb_3month = 0
+		seller.fb_12month = 0
+		seller.fb_lifetime = 0
+
+		if err := row.Scan(&seller.primary_id, &seller.seller_id, &seller.seller_name, &seller.keyword); err != nil {
 			log.Error(err)
 			continue
 		}
@@ -113,6 +125,9 @@ func (seller *sellerStruct) main() error {
 		if err := seller.update(); err != nil {
 			log.Error(err)
 			continue
+		}
+		if err := seller.syncToAmazonShop(); err != nil {
+			log.Error(err)
 		}
 
 	}
@@ -336,4 +351,73 @@ func (seller *sellerStruct) nameCheck() {
 func (seller *sellerStruct) update() error {
 	_, err := app.db.Exec("update amc_seller set trn_status=?,trn=?,name=?,address=?,all_status=?,fb_1month=?,fb_3month=?,fb_12month=?,fb_lifetime=? where id=? and app_id=?", seller.trn_status, seller.trn, seller.businessName, seller.address, seller.all_status, seller.fb_1month, seller.fb_3month, seller.fb_12month, seller.fb_lifetime, seller.primary_id, app.Basic.App_id)
 	return err
+}
+
+func (seller *sellerStruct) syncToAmazonShop() error {
+	if seller.keyword == "" {
+		log.Warn("keyword 为空，跳过同步到 amazon_shop 表")
+		return nil
+	}
+
+	shopUrl := fmt.Sprintf("https://%s/sp?ie=UTF8&seller=%s", app.Domain, seller.seller_id)
+
+	query := "SELECT id FROM tb_amazon_shop WHERE domain = ? AND shop_id = ?"
+	var existingId int
+	err := app.db.QueryRow(query, seller.keyword, seller.seller_id).Scan(&existingId)
+
+	if err == sql.ErrNoRows {
+		insertSQL := `INSERT INTO tb_amazon_shop 
+			(user_id, domain, shop_id, shop_name, shop_url, marketplace, 
+			 company_name, company_address, fb_1month, fb_3month, fb_12month, fb_lifetime, 
+			 main_products, avg_price, estimated_monthly_sales, crawl_time, create_time, update_time)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`
+		_, err = app.db.Exec(insertSQL,
+			1,
+			seller.keyword,
+			seller.seller_id,
+			seller.seller_name,
+			shopUrl,
+			"US",
+			seller.businessName,
+			seller.address,
+			seller.fb_1month,
+			seller.fb_3month,
+			seller.fb_12month,
+			seller.fb_lifetime,
+			"",
+			0,
+			0,
+			nil)
+		if err != nil {
+			log.Errorf("同步到 amazon_shop 表失败: %v", err)
+			return err
+		}
+		log.Infof("成功同步到 amazon_shop 表: domain=%s, shop_id=%s", seller.keyword, seller.seller_id)
+	} else if err != nil {
+		log.Errorf("查询 amazon_shop 表失败: %v", err)
+		return err
+	} else {
+		updateSQL := `UPDATE tb_amazon_shop SET 
+			shop_name = ?, shop_url = ?, company_name = ?, company_address = ?,
+			fb_1month = ?, fb_3month = ?, fb_12month = ?, fb_lifetime = ?,
+			crawl_time = NOW(), update_time = NOW()
+			WHERE id = ?`
+		_, err = app.db.Exec(updateSQL,
+			seller.seller_name,
+			shopUrl,
+			seller.businessName,
+			seller.address,
+			seller.fb_1month,
+			seller.fb_3month,
+			seller.fb_12month,
+			seller.fb_lifetime,
+			existingId)
+		if err != nil {
+			log.Errorf("更新 amazon_shop 表失败: %v", err)
+			return err
+		}
+		log.Infof("成功更新 amazon_shop 表: id=%d", existingId)
+	}
+
+	return nil
 }
