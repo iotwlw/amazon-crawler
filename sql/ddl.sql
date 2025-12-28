@@ -124,10 +124,10 @@ SET character_set_client = @saved_cs_client;
 -- Table structure for table `application`
 --
 
-DROP TABLE IF EXISTS `application`;
+DROP TABLE IF EXISTS `amc_application`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `application` (
+CREATE TABLE `amc_application` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `app_id` int(11) NOT NULL,
   `status` tinyint(1) NOT NULL DEFAULT '0',
@@ -140,10 +140,10 @@ CREATE TABLE `application` (
 -- Table structure for table `category`
 --
 
-DROP TABLE IF EXISTS `category`;
+DROP TABLE IF EXISTS `amc_category`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `category` (
+CREATE TABLE `amc_category` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `zh_key` varchar(30) NOT NULL,
   `en_key` varchar(50) NOT NULL,
@@ -156,10 +156,10 @@ CREATE TABLE `category` (
 -- Table structure for table `cookie`
 --
 
-DROP TABLE IF EXISTS `cookie`;
+DROP TABLE IF EXISTS `amc_cookie`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `cookie` (
+CREATE TABLE `amc_cookie` (
   `host_id` tinyint(1) NOT NULL,
   `cookie` text,
   PRIMARY KEY (`host_id`)
@@ -170,10 +170,10 @@ CREATE TABLE `cookie` (
 -- Table structure for table `product`
 --
 
-DROP TABLE IF EXISTS `product`;
+DROP TABLE IF EXISTS `amc_product`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `product` (
+CREATE TABLE `amc_product` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `url` varchar(200) NOT NULL,
   `param` varchar(1000) NOT NULL,
@@ -198,10 +198,10 @@ CREATE TABLE `product` (
 -- Table structure for table `search_statistics`
 --
 
-DROP TABLE IF EXISTS `search_statistics`;
+DROP TABLE IF EXISTS `amc_search_statistics`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `search_statistics` (
+CREATE TABLE `amc_search_statistics` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `category_id` int(11) NOT NULL,
   `start` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -211,7 +211,7 @@ CREATE TABLE `search_statistics` (
   `valid` int(11) DEFAULT '0',
   PRIMARY KEY (`id`),
   KEY `category_id` (`category_id`),
-  CONSTRAINT `search_statistics_ibfk_1` FOREIGN KEY (`category_id`) REFERENCES `category` (`id`)
+  CONSTRAINT `amc_search_statistics_ibfk_1` FOREIGN KEY (`category_id`) REFERENCES `amc_category` (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=2352 DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -219,10 +219,10 @@ CREATE TABLE `search_statistics` (
 -- Table structure for table `seller`
 --
 
-DROP TABLE IF EXISTS `seller`;
+DROP TABLE IF EXISTS `amc_seller`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `seller` (
+CREATE TABLE `amc_seller` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `seller_id` varchar(25) NOT NULL,
   `name` varchar(200) DEFAULT NULL,
@@ -258,7 +258,7 @@ USE `amazon`;
 /*!50001 SET collation_connection      = utf8mb4_general_ci */;
 /*!50001 CREATE ALGORITHM=UNDEFINED */
 /*!50013 DEFINER=`amazon`@`%` SQL SECURITY DEFINER */
-/*!50001 VIEW `产品检查表` AS select (case when (`product`.`status` = 0) then '未搜索' when (`product`.`status` = 1) then '准备检查' when (`product`.`status` = 2) then '检查结束' when (`product`.`status` = 3) then '其他错误' when (`product`.`status` = 4) then '没有商家' else `product`.`status` end) AS `状态`,count(0) AS `链接数量` from `product` group by `product`.`status` */;
+/*!50001 VIEW `产品检查表` AS select (case when (`amc_product`.`status` = 0) then '未搜索' when (`amc_product`.`status` = 1) then '准备检查' when (`amc_product`.`status` = 2) then '检查结束' when (`amc_product`.`status` = 3) then '其他错误' when (`amc_product`.`status` = 4) then '没有商家' else `amc_product`.`status` end) AS `状态`,count(0) AS `链接数量` from `amc_product` group by `amc_product`.`status` */;
 /*!50001 SET character_set_client      = @saved_cs_client */;
 /*!50001 SET character_set_results     = @saved_cs_results */;
 /*!50001 SET collation_connection      = @saved_col_connection */;
@@ -294,7 +294,7 @@ USE `amazon`;
 /*!50001 SET collation_connection      = utf8mb4_general_ci */;
 /*!50001 CREATE ALGORITHM=UNDEFINED */
 /*!50013 DEFINER=`amazon`@`%` SQL SECURITY DEFINER */
-/*!50001 VIEW `商家信息表` AS select `seller`.`seller_id` AS `商家ID`,`seller`.`name` AS `名称`,`seller`.`address` AS `地址`,`seller`.`trn` AS `税号`,(case `seller`.`trn_status` when 0 then 'TRN未查找' when 1 then '中国TRN' when 2 then '空TRN' when 3 then '其他TRN' when 4 then '异常TRN' end) AS `税号标识`,(case `seller`.`all_status` when 0 then '未查找' when 1 then '信息完整' when 2 then '没有名称' when 3 then '没有地址' when 4 then '没有TRN' end) AS `信息标识` from `seller` */;
+/*!50001 VIEW `商家信息表` AS select `amc_seller`.`seller_id` AS `商家ID`,`amc_seller`.`name` AS `名称`,`amc_seller`.`address` AS `地址`,`amc_seller`.`trn` AS `税号`,(case `amc_seller`.`trn_status` when 0 then 'TRN未查找' when 1 then '中国TRN' when 2 then '空TRN' when 3 then '其他TRN' when 4 then '异常TRN' end) AS `税号标识`,(case `amc_seller`.`all_status` when 0 then '未查找' when 1 then '信息完整' when 2 then '没有名称' when 3 then '没有地址' when 4 then '没有TRN' end) AS `信息标识` from `amc_seller` */;
 /*!50001 SET character_set_client      = @saved_cs_client */;
 /*!50001 SET character_set_results     = @saved_cs_results */;
 /*!50001 SET collation_connection      = @saved_col_connection */;
@@ -312,7 +312,7 @@ USE `amazon`;
 /*!50001 SET collation_connection      = utf8mb4_general_ci */;
 /*!50001 CREATE ALGORITHM=UNDEFINED */
 /*!50013 DEFINER=`amazon`@`%` SQL SECURITY DEFINER */
-/*!50001 VIEW `商家trn表` AS select (case `seller`.`trn_status` when 0 then 'TRN未查找' when 1 then '中国TRN' when 2 then '空TRN' when 3 then '其他TRN' when 4 then '异常TRN' end) AS `数量`,count(0) AS `count(*)` from `seller` group by `seller`.`trn_status` */;
+/*!50001 VIEW `商家trn表` AS select (case `amc_seller`.`trn_status` when 0 then 'TRN未查找' when 1 then '中国TRN' when 2 then '空TRN' when 3 then '其他TRN' when 4 then '异常TRN' end) AS `数量`,count(0) AS `count(*)` from `amc_seller` group by `amc_seller`.`trn_status` */;
 /*!50001 SET character_set_client      = @saved_cs_client */;
 /*!50001 SET character_set_results     = @saved_cs_results */;
 /*!50001 SET collation_connection      = @saved_col_connection */;
@@ -330,7 +330,7 @@ USE `amazon`;
 /*!50001 SET collation_connection      = utf8mb4_general_ci */;
 /*!50001 CREATE ALGORITHM=UNDEFINED */
 /*!50013 DEFINER=`amazon`@`%` SQL SECURITY DEFINER */
-/*!50001 VIEW `搜索统计表` AS select `k`.`zh_key` AS `中文关键词`,count(0) AS `搜索次数`,sum(`s`.`valid`) AS `产品数` from (`amazon`.`search_statistics` `s` join (select `amazon`.`category`.`id` AS `id`,`amazon`.`category`.`zh_key` AS `zh_key` from `amazon`.`category`) `k` on((`s`.`category_id` = `k`.`id`))) group by `s`.`category_id` */;
+/*!50001 VIEW `搜索统计表` AS select `k`.`zh_key` AS `中文关键词`,count(0) AS `搜索次数`,sum(`s`.`valid`) AS `产品数` from (`amazon`.`amc_search_statistics` `s` join (select `amazon`.`amc_category`.`id` AS `id`,`amazon`.`amc_category`.`zh_key` AS `zh_key` from `amazon`.`amc_category`) `k` on((`s`.`category_id` = `k`.`id`))) group by `s`.`category_id` */;
 /*!50001 SET character_set_client      = @saved_cs_client */;
 /*!50001 SET character_set_results     = @saved_cs_results */;
 /*!50001 SET collation_connection      = @saved_col_connection */;
@@ -348,7 +348,7 @@ USE `amazon`;
 /*!50001 SET collation_connection      = utf8mb4_general_ci */;
 /*!50001 CREATE ALGORITHM=UNDEFINED */
 /*!50013 DEFINER=`amazon`@`%` SQL SECURITY DEFINER */
-/*!50001 VIEW `程序状态表` AS select `application`.`app_id` AS `app_id`,(case when (`application`.`status` = 0) then '启动中' when (`application`.`status` = 1) then '结束' when (`application`.`status` = 2) then '1.搜索页面中' when (`application`.`status` = 3) then '2.查找商家中' when (`application`.`status` = 4) then '3.确定TRN中' end) AS `状态`,`application`.`update` AS `更新时间` from `application` order by `application`.`update` desc */;
+/*!50001 VIEW `程序状态表` AS select `amc_application`.`app_id` AS `app_id`,(case when (`amc_application`.`status` = 0) then '启动中' when (`amc_application`.`status` = 1) then '结束' when (`amc_application`.`status` = 2) then '1.搜索页面中' when (`amc_application`.`status` = 3) then '2.查找商家中' when (`amc_application`.`status` = 4) then '3.确定TRN中' end) AS `状态`,`amc_application`.`update` AS `更新时间` from `amc_application` order by `amc_application`.`update` desc */;
 /*!50001 SET character_set_client      = @saved_cs_client */;
 /*!50001 SET character_set_results     = @saved_cs_results */;
 /*!50001 SET collation_connection      = @saved_col_connection */;
@@ -366,7 +366,7 @@ USE `amazon`;
 /*!50001 SET collation_connection      = utf8mb4_general_ci */;
 /*!50001 CREATE ALGORITHM=UNDEFINED */
 /*!50013 DEFINER=`amazon`@`%` SQL SECURITY DEFINER */
-/*!50001 VIEW `类别总数表` AS select count(0) AS `类别总数` from `category` */;
+/*!50001 VIEW `类别总数表` AS select count(0) AS `类别总数` from `amc_category` */;
 /*!50001 SET character_set_client      = @saved_cs_client */;
 /*!50001 SET character_set_results     = @saved_cs_results */;
 /*!50001 SET collation_connection      = @saved_col_connection */;

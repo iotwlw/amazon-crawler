@@ -46,13 +46,13 @@ func (product *productStruct) main() error {
 
 	app.update(MYSQL_APPLICATION_STATUS_PRODUCT)
 
-	_, err := app.db.Exec("UPDATE product SET status = ? ,app = ? WHERE (status = ? or status=?) and (app=? or app=?)  LIMIT 100", MYSQL_PRODUCT_STATUS_CHEKCK, app.Basic.App_id, MYSQL_PRODUCT_STATUS_INSERT, MYSQL_PRODUCT_STATUS_ERROR_OVER, 0, app.Basic.App_id)
+	_, err := app.db.Exec("UPDATE amc_product SET status = ? ,app = ? WHERE (status = ? or status=?) and (app=? or app=?)  LIMIT 100", MYSQL_PRODUCT_STATUS_CHEKCK, app.Basic.App_id, MYSQL_PRODUCT_STATUS_INSERT, MYSQL_PRODUCT_STATUS_ERROR_OVER, 0, app.Basic.App_id)
 	if err != nil {
 		log.Errorf("更新product表失败,%v", err)
 		return err
 	}
 
-	row, err := app.db.Query(`select id,url,param from product where status=? and app = ?`, MYSQL_PRODUCT_STATUS_CHEKCK, app.Basic.App_id)
+	row, err := app.db.Query(`select id,url,param from amc_product where status=? and app = ?`, MYSQL_PRODUCT_STATUS_CHEKCK, app.Basic.App_id)
 	if err != nil {
 		log.Errorf("查询product表失败,%v", err)
 		return err
@@ -217,20 +217,20 @@ func (product *productStruct) get_seller_id() string {
 	return product.id
 }
 func (product *productStruct) insert_selll_id() error {
-	_, err := app.db.Exec("insert into seller (seller_id,app_id) values(?,?)", product.id, 0)
+	_, err := app.db.Exec("insert into amc_seller (seller_id,app_id) values(?,?)", product.id, 0)
 	return err
 }
 
 func (product *productStruct) update_status(id int64, s int, seller_id string, brand_name string, brand_store_url string) error {
 	if seller_id != "" || brand_name != "" || brand_store_url != "" {
-		_, err := app.db.Exec("UPDATE product SET status = ?, app = ?, seller_id = ?, brand_name = ?, brand_store_url = ? WHERE id = ?", s, app.Basic.App_id, seller_id, brand_name, brand_store_url, id)
+		_, err := app.db.Exec("UPDATE amc_product SET status = ?, app = ?, seller_id = ?, brand_name = ?, brand_store_url = ? WHERE id = ?", s, app.Basic.App_id, seller_id, brand_name, brand_store_url, id)
 		if err != nil {
 			log.Infof("更新product表状态失败 ID:%d app:%d 状态:%d seller_id:%s brand_name:%s brand_store_url:%s", id, app.Basic.App_id, s, seller_id, brand_name, brand_store_url)
 			return err
 		}
 		log.Infof("更新product表状态成功 ID:%d 状态:%d app:%d seller_id:%s brand_name:%s brand_store_url:%s", id, s, app.Basic.App_id, seller_id, brand_name, brand_store_url)
 	} else {
-		_, err := app.db.Exec("UPDATE product SET status = ?, app = ? WHERE id = ?", s, app.Basic.App_id, id)
+		_, err := app.db.Exec("UPDATE amc_product SET status = ?, app = ? WHERE id = ?", s, app.Basic.App_id, id)
 		if err != nil {
 			log.Infof("更新product表状态失败 ID:%d app:%d 状态:%d", id, app.Basic.App_id, s)
 			return err

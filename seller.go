@@ -43,7 +43,7 @@ func (seller *sellerStruct) over() {
 	log.Infof("------------------------")
 }
 func (seller *sellerStruct) start() error {
-	_, err := app.db.Exec("UPDATE seller SET app_id = ? WHERE all_status = ? and (app_id=? or app_id=?) LIMIT 100", app.Basic.App_id, MYSQL_SELLER_STATUS_INFO_INSERT, 0, app.Basic.App_id)
+	_, err := app.db.Exec("UPDATE amc_seller SET app_id = ? WHERE all_status = ? and (app_id=? or app_id=?) LIMIT 100", app.Basic.App_id, MYSQL_SELLER_STATUS_INFO_INSERT, 0, app.Basic.App_id)
 	if err != nil {
 		log.Errorf("更新seller表失败,%v", err)
 		return err
@@ -74,7 +74,7 @@ func (seller *sellerStruct) main() error {
 		return err
 	}
 
-	row, err := app.db.Query("select id,seller_id from seller where all_status =? and app_id=?", MYSQL_SELLER_STATUS_INFO_INSERT, app.Basic.App_id)
+	row, err := app.db.Query("select id,seller_id from amc_seller where all_status =? and app_id=?", MYSQL_SELLER_STATUS_INFO_INSERT, app.Basic.App_id)
 	switch err {
 	case nil:
 		break
@@ -275,6 +275,6 @@ func (seller *sellerStruct) nameCheck() {
 	log.Infof("查找结果 商家名称: %s", seller.businessName)
 }
 func (seller *sellerStruct) update() error {
-	_, err := app.db.Exec("update seller set trn_status=?,trn=?,name=?,address=?,all_status=? where id=? and app_id=?", seller.trn_status, seller.trn, seller.businessName, seller.address, seller.all_status, seller.primary_id, app.Basic.App_id)
+	_, err := app.db.Exec("update amc_seller set trn_status=?,trn=?,name=?,address=?,all_status=? where id=? and app_id=?", seller.trn_status, seller.trn, seller.businessName, seller.address, seller.all_status, seller.primary_id, app.Basic.App_id)
 	return err
 }

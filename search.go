@@ -96,16 +96,16 @@ func (s *searchStruct) get_category() (*sql.Rows, error) {
 	switch app.Exec.Search_priority {
 	case 1:
 		log.Infof("搜索优先级优先")
-		return app.db.Query(`select id,zh_key,en_key from category order by priority DESC`)
+		return app.db.Query(`select id,zh_key,en_key from amc_category order by priority DESC`)
 	case 2:
 		log.Infof("搜索次数少优先")
-		return app.db.Query(`SELECT c.id, c.zh_key, c.en_key  FROM category c LEFT JOIN search_statistics s ON s.category_id = c.id GROUP BY c.id ORDER BY COUNT(s.category_id),id`)
+		return app.db.Query(`SELECT c.id, c.zh_key, c.en_key  FROM amc_category c LEFT JOIN amc_search_statistics s ON s.category_id = c.id GROUP BY c.id ORDER BY COUNT(s.category_id),id`)
 	}
 	log.Infof("错误的输入，按搜索优先级优先")
-	return app.db.Query(`select id,zh_key,en_key from category order by priority DESC `)
+	return app.db.Query(`select id,zh_key,en_key from amc_category order by priority DESC `)
 }
 func (s *searchStruct) search_start() (int64, error) {
-	r, err := app.db.Exec("insert into search_statistics(category_id,app) values(?,?)", s.category_id, app.Basic.App_id)
+	r, err := app.db.Exec("insert into amc_search_statistics(category_id,app) values(?,?)", s.category_id, app.Basic.App_id)
 	if err != nil {
 		return 0, err
 	}
@@ -118,7 +118,7 @@ func (s *searchStruct) search_start() (int64, error) {
 	return id, nil
 }
 func (s *searchStruct) search_end(insert_id int64) error {
-	_, err := app.db.Exec("update search_statistics set status=?,end=CURRENT_TIMESTAMP,valid=? where id=?", MYSQL_SEARCH_STATUS_OVER, s.valid, insert_id)
+	_, err := app.db.Exec("update amc_search_statistics set status=?,end=CURRENT_TIMESTAMP,valid=? where id=?", MYSQL_SEARCH_STATUS_OVER, s.valid, insert_id)
 	if err != nil {
 		return err
 	}
@@ -328,7 +328,7 @@ func (s *searchStruct) deal_prouct_url(link string, title string, boughtCount st
 	if strings.Contains(url[0], "/dp/") {
 		asin = strings.Split(url[0], "/dp/")[1]
 	}
-	_, err := app.db.Exec(`INSERT INTO product(url,param,title,asin,keyword,bought_count,price,rating,review_count,brand_name,brand_store_url) values(?,?,?,?,?,?,?,?,?,?,?)`, url[0], "/ref="+url[1], title, asin, s.en_key, boughtCount, price, rating, reviewCount, brandName, brandStoreUrl)
+	_, err := app.db.Exec(`INSERT INTO amc_product(url,param,title,asin,keyword,bought_count,price,rating,review_count,brand_name,brand_store_url) values(?,?,?,?,?,?,?,?,?,?,?)`, url[0], "/ref="+url[1], title, asin, s.en_key, boughtCount, price, rating, reviewCount, brandName, brandStoreUrl)
 
 	link = fmt.Sprintf("https://%s%s", app.Domain, link)
 	if is_duplicate_entry(err) {

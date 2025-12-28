@@ -194,7 +194,7 @@ func (app *appConfig) get_cookie() (string, error) {
 		return "", fmt.Errorf("配置文件中host_id为0，cookie将为空")
 	}
 
-	if err := app.db.QueryRow("select cookie from cookie where host_id = ?", app.Basic.Host_id).Scan(&cookie); err != nil {
+	if err := app.db.QueryRow("select cookie from amc_cookie where host_id = ?", app.Basic.Host_id).Scan(&cookie); err != nil {
 		return "", err
 	}
 	cookie = strings.TrimSpace(cookie)
@@ -210,7 +210,7 @@ func (app *appConfig) start() {
 		log.Infof("测试模式启动")
 		return
 	}
-	r, err := app.db.Exec("insert into application (app_id) values(?)", app.Basic.App_id)
+	r, err := app.db.Exec("insert into amc_application (app_id) values(?)", app.Basic.App_id)
 	if err != nil {
 		panic(err)
 	}
@@ -221,7 +221,7 @@ func (app *appConfig) start() {
 	app.primary_id = id
 }
 func (app *appConfig) update(status int) {
-	_, err := app.db.Exec("update application set status=? where id=?", status, app.primary_id)
+	_, err := app.db.Exec("update amc_application set status=? where id=?", status, app.primary_id)
 	if err != nil {
 		panic(err)
 	}
@@ -230,7 +230,7 @@ func (app *appConfig) end() {
 	if app.Basic.Test {
 		return
 	}
-	if _, err := app.db.Exec("update application set status=? where id=?", MYSQL_APPLICATION_STATUS_OVER, app.primary_id); err != nil {
+	if _, err := app.db.Exec("update amc_application set status=? where id=?", MYSQL_APPLICATION_STATUS_OVER, app.primary_id); err != nil {
 		log.Error(err)
 	}
 }
