@@ -50,7 +50,7 @@ func (product *productStruct) main() error {
 
 	app.update(MYSQL_APPLICATION_STATUS_PRODUCT)
 
-	_, err := app.db.Exec("UPDATE amc_product SET status = ? ,app = ? WHERE (status = ? or status=?) and (app=? or app=?)  LIMIT 100", MYSQL_PRODUCT_STATUS_CHEKCK, app.Basic.App_id, MYSQL_PRODUCT_STATUS_INSERT, MYSQL_PRODUCT_STATUS_ERROR_OVER, 0, app.Basic.App_id)
+	_, err := app.db.Exec("UPDATE amc_product SET status = ? ,app = ? WHERE (status = ? or status=?) and (app=? or app=?)  LIMIT 1000", MYSQL_PRODUCT_STATUS_CHEKCK, app.Basic.App_id, MYSQL_PRODUCT_STATUS_INSERT, MYSQL_PRODUCT_STATUS_ERROR_OVER, 0, app.Basic.App_id)
 	if err != nil {
 		log.Errorf("更新product表失败,%v", err)
 		return err
@@ -227,6 +227,7 @@ func (product *productStruct) request(url string) error {
 
 	return nil
 }
+
 // get_seller_id 从 URL 中提取 seller ID
 func (product *productStruct) get_seller_id() string {
 	for _, j := range strings.Split(product.url, "&") {
