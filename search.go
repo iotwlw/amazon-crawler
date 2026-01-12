@@ -213,6 +213,11 @@ func (s *searchStruct) get_product_url(doc *goquery.Document) {
 	}
 	log.Infof("找到商品项数:%d 关键词:%s", data_index.Length(), s.zh_key)
 
+	// ASIN 计数器
+	withBoughtCount := 0    // 有销量标签的数量
+	noBoughtCount := 0      // 无销量标签的数量
+	const maxTotalASIN = 10 // 最少保证 10 个 ASIN
+
 	data_index.Each(func(i int, g *goquery.Selection) {
 
 		link, exist := g.Find("a").First().Attr("href")
@@ -232,13 +237,22 @@ func (s *searchStruct) get_product_url(doc *goquery.Document) {
 				return strings.Contains(text, "bought in past month")
 			})
 			if boughtSpan.Length() > 0 {
+				// 有销量标签，全部加入
 				boughtText := strings.TrimSpace(boughtSpan.First().Text())
 				parts := strings.Split(boughtText, "+")
 				if len(parts) > 0 {
 					boughtCount = strings.TrimSpace(parts[0])
 				}
+				withBoughtCount++
 			} else {
-				return
+				// 没有销量标签，只有当有销量标签的数量不足 10 个时才补足
+				if withBoughtCount >= maxTotalASIN {
+					return // 有销量的已经够了，不需要补足
+				}
+				if withBoughtCount+noBoughtCount >= maxTotalASIN {
+					return // 总数已经达到 10 个，不再补足
+				}
+				noBoughtCount++
 			}
 
 			price := ""
@@ -318,4 +332,20 @@ func (s *searchStruct) deal_prouct_url(link string, title string, boughtCount st
 
 	log.Infof("商品插入成功 关键词:%s 链接:%s 标题:%s ASIN:%s 购买数量:%s 价格:%s 星级:%s 评分数量:%s", s.en_key, link, title, asin, boughtCount, price, rating, reviewCount)
 	s.valid += 1
+}
+
+// searchStartForAPI 为 API 模式插入搜索统计记录
+// category_id 设为 0 表示来自 API 调用
+func (s *searchStruct) searchStartForAPI() (int64, error) {
+	r, err := app.db.Exec("INSERT INTO amc_search_statistics(category_id, app) VALUES(0, ?)", app.Basic.App_id)
+	if err != nil {
+		return 0, err
+	}
+
+	id, err := r.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	log.Infof("开始搜索(API模式) 关键词:%s 状态:%d(开始)", s.zh_key, MYSQL_SEARCH_STATUS_START)
+	return id, nil
 }

@@ -69,6 +69,7 @@ type Mysql struct {
 }
 type flagStruct struct {
 	config_file string
+	serve       string // HTTP 服务模式，值为监听地址如 ":8080"
 }
 
 var app appConfig
@@ -162,6 +163,7 @@ func init_signal() {
 func init_flag() flagStruct {
 	var f flagStruct
 	flag.StringVar(&f.config_file, "c", "config.yaml", "打开配置文件")
+	flag.StringVar(&f.serve, "serve", "", "启动 HTTP 服务模式，指定监听地址如 :8080")
 	flag.Parse()
 	return f
 }
@@ -174,19 +176,33 @@ func main() {
 	init_network()
 	init_signal()
 
-	app.start()
+	// 根据是否传入 -serve 参数决定启动模式
+	if f.serve != "" {
+		// HTTP 服务模式
+		log.Infof("启动 HTTP 服务模式")
 
-	for app.Exec.Loop.all_time = 0; app.Exec.Loop.all_time < app.Exec.Loop.All; app.Exec.Loop.all_time++ {
-		var search searchStruct
-		search.main()
+		// 初始化并启动任务消费者
+		InitTaskWorker()
+		taskWorker.Start()
 
-		var product productStruct
-		product.main()
+		// 启动 HTTP 服务（阻塞）
+		StartHTTPServer(f.serve)
+	} else {
+		// 原有命令行模式
+		log.Infof("启动命令行模式")
+		app.start()
 
-		var seller sellerStruct
-		seller.main()
+		for app.Exec.Loop.all_time = 0; app.Exec.Loop.all_time < app.Exec.Loop.All; app.Exec.Loop.all_time++ {
+			var search searchStruct
+			search.main()
+
+			var product productStruct
+			product.main()
+
+			var seller sellerStruct
+			seller.main()
+		}
 	}
-
 }
 func (app *appConfig) get_cookie() (string, error) {
 	var cookie string

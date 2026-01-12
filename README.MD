@@ -83,8 +83,85 @@ session-id=xxxx; session-id-time=2082787201l; i18n-prefs=GBP; sp-cdn="L5Z9:JP"; 
 
 # 四、启动
 
-```
+## 命令行模式（原有方式）
+
+从数据库 `amc_category` 表读取关键词，自动循环执行：
+
+```bash
 ./amazon-crawler -c config.yaml
+```
+
+## HTTP 服务模式（API 调用）
+
+启动 HTTP 服务，通过 API 接收任务：
+
+```bash
+./amazon-crawler -c config.yaml -serve :8080
+```
+
+### API 接口
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | /api/crawl | 提交爬取任务 |
+| GET | /api/status | 查看任务状态 |
+| GET | /health | 健康检查 |
+
+### 提交任务
+
+```bash
+curl -X POST http://localhost:8080/api/crawl \
+  -H "Content-Type: application/json" \
+  -d '{"keywords": ["nike", "adidas", "puma"]}'
+```
+
+响应：
+```json
+{"code":0,"message":"任务已提交","data":{"total":3,"inserted":3,"skipped":0}}
+```
+
+### 查看状态
+
+```bash
+curl http://localhost:8080/api/status
+```
+
+响应：
+```json
+{"code":0,"message":"ok","data":{"pending":10,"completed":50,"failed":2}}
+```
+
+### 任务状态说明
+
+| 状态值 | 字段 | 说明 |
+|--------|------|------|
+| 0 | pending | 待执行 |
+| 1 | completed | 已执行 |
+| 2 | failed | 失败 |
+
+### 数据库表变更
+
+HTTP 服务模式需要先执行数据库变更：
+
+```sql
+ALTER TABLE `amc_category`
+ADD COLUMN `task_status` TINYINT(1) NOT NULL DEFAULT 0,
+ADD COLUMN `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ADD COLUMN `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;
+
+ALTER TABLE `amc_category` ADD INDEX `idx_task_status` (`task_status`);
+```
+
+### 执行流程
+
+```
+API 提交关键词 → 写入 amc_category 表 (task_status=0)
+                         ↓
+              Worker 轮询读取待执行任务
+                         ↓
+              搜索商品 → 提取卖家ID → 获取卖家详情
+                         ↓
+              更新 task_status (1=成功, 2=失败)
 ```
 
 
