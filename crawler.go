@@ -135,9 +135,18 @@ func crawlProduct(keyword string) error {
 			if err == ERROR_NOT_SELLER_URL {
 				product.update_status(primary_id, MYSQL_PRODUCT_STATUS_NO_PRODUCT, "", "", "")
 				continue
-			} else if err == ERROR_NOT_404 || err == ERROR_NOT_503 || err == ERROR_VERIFICATION {
+			} else if err == ERROR_NOT_404 || err == ERROR_NOT_503 {
 				product.update_status(primary_id, MYSQL_PRODUCT_STATUS_ERROR_OVER, "", "", "")
 				log.Error(err)
+				sleep(300)
+				continue
+			} else if err == ERROR_VERIFICATION {
+				// Cookie 失效，标记失效并尝试获取新的
+				product.update_status(primary_id, MYSQL_PRODUCT_STATUS_ERROR_OVER, "", "", "")
+				log.Error(err)
+				if err := app.handleCookieInvalid(); err != nil {
+					log.Errorf("处理 cookie 失效失败: %v", err)
+				}
 				sleep(300)
 				continue
 			} else {

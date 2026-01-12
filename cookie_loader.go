@@ -85,19 +85,31 @@ func SaveCookiesToFile(filePath string, cookies []CookieEntry) error {
 	return nil
 }
 
-// SaveCookieToDatabase 保存 Cookie 到数据库
-func SaveCookieToDatabase(hostID int, cookie string) error {
-	// 使用 INSERT ... ON DUPLICATE KEY UPDATE 实现 upsert
+// SaveCookieToDatabase 保存新的 Cookie 到数据库（host_id 为空，等待分配）
+func SaveCookieToDatabase(cookie string, zipcode string, city string) error {
 	_, err := app.db.Exec(
-		`INSERT INTO amc_cookie (host_id, cookie) VALUES (?, ?)
-		 ON DUPLICATE KEY UPDATE cookie = VALUES(cookie)`,
-		hostID, cookie,
+		`INSERT INTO amc_cookie (cookie, zipcode, city, status) VALUES (?, ?, ?, 1)`,
+		cookie, zipcode, city,
 	)
 	if err != nil {
 		return fmt.Errorf("保存 Cookie 到数据库失败: %w", err)
 	}
 
-	log.Infof("已保存 Cookie 到数据库 (host_id=%d)", hostID)
+	log.Infof("已保存新 Cookie 到数据库 (zipcode=%s, city=%s)", zipcode, city)
+	return nil
+}
+
+// SaveCookieToDatabaseWithHostID 保存 Cookie 到数据库并指定 host_id（用于迁移或强制绑定）
+func SaveCookieToDatabaseWithHostID(hostID int, cookie string, zipcode string, city string) error {
+	_, err := app.db.Exec(
+		`INSERT INTO amc_cookie (host_id, cookie, zipcode, city, status) VALUES (?, ?, ?, ?, 1)`,
+		hostID, cookie, zipcode, city,
+	)
+	if err != nil {
+		return fmt.Errorf("保存 Cookie 到数据库失败: %w", err)
+	}
+
+	log.Infof("已保存 Cookie 到数据库 (host_id=%d, zipcode=%s)", hostID, zipcode)
 	return nil
 }
 
@@ -105,4 +117,34 @@ func SaveCookieToDatabase(hostID int, cookie string) error {
 func GetRandomZipcode() (string, string) {
 	idx := time.Now().UnixNano() % int64(len(USZipCodes))
 	return USZipCodes[idx].Zipcode, USZipCodes[idx].City
+}
+
+// CookieStats Cookie 统计信息
+type CookieStats struct {
+	Total       int `json:"total"`        // 总数
+	Active      int `json:"active"`       // 正常状态
+	Invalid     int `json:"invalid"`      // 已失效
+	Unassigned  int `json:"unassigned"`   // 未分配（正常状态且 host_id 为空）
+	Assigned    int `json:"assigned"`     // 已分配（正常状态且 host_id 不为空）
+}
+
+// GetCookieStats 获取 Cookie 统计信息
+func GetCookieStats() (*CookieStats, error) {
+	stats := &CookieStats{}
+
+	err := app.db.QueryRow(`
+		SELECT
+			COUNT(*) as total,
+			SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as active,
+			SUM(CASE WHEN status = 0 THEN 1 ELSE 0 END) as invalid,
+			SUM(CASE WHEN status = 1 AND host_id IS NULL THEN 1 ELSE 0 END) as unassigned,
+			SUM(CASE WHEN status = 1 AND host_id IS NOT NULL THEN 1 ELSE 0 END) as assigned
+		FROM amc_cookie
+	`).Scan(&stats.Total, &stats.Active, &stats.Invalid, &stats.Unassigned, &stats.Assigned)
+
+	if err != nil {
+		return nil, fmt.Errorf("获取 Cookie 统计失败: %w", err)
+	}
+
+	return stats, nil
 }

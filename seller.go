@@ -116,6 +116,12 @@ func (seller *sellerStruct) main() error {
 
 		for err := seller.request(); err != nil; {
 			log.Error(err)
+			if err == ERROR_VERIFICATION {
+				// Cookie 失效，标记失效并尝试获取新的
+				if err := app.handleCookieInvalid(); err != nil {
+					log.Errorf("处理 cookie 失效失败: %v", err)
+				}
+			}
 			sleep(120)
 		}
 

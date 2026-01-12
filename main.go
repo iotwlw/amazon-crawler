@@ -27,6 +27,7 @@ type appConfig struct {
 	Exec       `yaml:"exec"`
 	db         *sql.DB
 	cookie     string
+	cookieID   int64 // 当前使用的 cookie 记录 ID
 	primary_id int64
 }
 type Exec struct {
@@ -206,20 +207,112 @@ func main() {
 }
 func (app *appConfig) get_cookie() (string, error) {
 	var cookie string
+	var cookieID int64
 	if app.Basic.Host_id == 0 {
 		return "", fmt.Errorf("配置文件中host_id为0，cookie将为空")
 	}
 
-	if err := app.db.QueryRow("select cookie from amc_cookie where host_id = ?", app.Basic.Host_id).Scan(&cookie); err != nil {
+	// 查询当前 host_id 绑定的正常状态的 cookie
+	err := app.db.QueryRow(
+		"SELECT id, cookie FROM amc_cookie WHERE host_id = ? AND status = 1 LIMIT 1",
+		app.Basic.Host_id,
+	).Scan(&cookieID, &cookie)
+
+	if err == sql.ErrNoRows {
+		// 当前 host_id 没有可用的 cookie，尝试从未分配的 cookie 中获取一个
+		log.Warnf("host_id=%d 没有可用的 cookie，尝试获取新的", app.Basic.Host_id)
+		return app.acquireNewCookie()
+	} else if err != nil {
 		return "", err
 	}
+
 	cookie = strings.TrimSpace(cookie)
 	if app.cookie != cookie {
-		log.Infof("使用新cookie: %s", cookie)
+		previewLen := 50
+		if len(cookie) < previewLen {
+			previewLen = len(cookie)
+		}
+		log.Infof("使用 cookie (id=%d): %s...", cookieID, cookie[:previewLen])
 	}
 
 	app.cookie = cookie
+	app.cookieID = cookieID
 	return app.cookie, nil
+}
+
+// acquireNewCookie 从未分配的正常 cookie 中获取一个并绑定到当前 host_id
+func (app *appConfig) acquireNewCookie() (string, error) {
+	tx, err := app.db.Begin()
+	if err != nil {
+		return "", fmt.Errorf("开始事务失败: %w", err)
+	}
+	defer tx.Rollback()
+
+	var cookieID int64
+	var cookie string
+
+	// 查找一个未分配的正常 cookie（host_id 为 NULL）
+	err = tx.QueryRow(
+		"SELECT id, cookie FROM amc_cookie WHERE host_id IS NULL AND status = 1 LIMIT 1 FOR UPDATE",
+	).Scan(&cookieID, &cookie)
+
+	if err == sql.ErrNoRows {
+		return "", fmt.Errorf("没有可用的未分配 cookie，请通过 SKILL 获取新的 Session")
+	} else if err != nil {
+		return "", fmt.Errorf("查询未分配 cookie 失败: %w", err)
+	}
+
+	// 将 cookie 绑定到当前 host_id
+	_, err = tx.Exec(
+		"UPDATE amc_cookie SET host_id = ? WHERE id = ?",
+		app.Basic.Host_id, cookieID,
+	)
+	if err != nil {
+		return "", fmt.Errorf("绑定 cookie 失败: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("提交事务失败: %w", err)
+	}
+
+	cookie = strings.TrimSpace(cookie)
+	log.Infof("获取新 cookie (id=%d) 并绑定到 host_id=%d", cookieID, app.Basic.Host_id)
+
+	app.cookie = cookie
+	app.cookieID = cookieID
+	return app.cookie, nil
+}
+
+// markCookieInvalid 将当前使用的 cookie 标记为失效
+func (app *appConfig) markCookieInvalid() error {
+	if app.cookieID == 0 {
+		return fmt.Errorf("没有正在使用的 cookie")
+	}
+
+	_, err := app.db.Exec(
+		"UPDATE amc_cookie SET status = 0 WHERE id = ?",
+		app.cookieID,
+	)
+	if err != nil {
+		return fmt.Errorf("标记 cookie 失效失败: %w", err)
+	}
+
+	log.Warnf("cookie (id=%d) 已标记为失效", app.cookieID)
+	app.cookie = ""
+	app.cookieID = 0
+	return nil
+}
+
+// handleCookieInvalid 处理 cookie 失效的情况：标记失效并尝试获取新的
+func (app *appConfig) handleCookieInvalid() error {
+	// 标记当前 cookie 为失效
+	if err := app.markCookieInvalid(); err != nil {
+		log.Errorf("标记 cookie 失效出错: %v", err)
+	}
+
+	// 尝试获取新的 cookie
+	_, err := app.acquireNewCookie()
+	return err
 }
 func (app *appConfig) start() {
 	if app.Basic.Test {
