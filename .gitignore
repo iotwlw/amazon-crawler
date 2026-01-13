@@ -6,3 +6,5 @@ CLAUDE.md
 amazon-crawler.exe
 .gitignore
 nul
+amazon-crawler.exe~
+cookies.json
