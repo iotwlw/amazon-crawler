@@ -1,0 +1,141 @@
+{
+  "version": "1.0.0",
+  "lastUpdated": "2025-12-28T00:00:00Z",
+  "project": {
+    "name": "amazon-crawler",
+    "description": "分布式亚马逊商品信息爬虫工具",
+    "language": "Go",
+    "version": "1.4.0"
+  },
+  "structure": {
+    "type": "single-module",
+    "modules": [
+      {
+        "path": "/",
+        "name": "core",
+        "description": "核心爬虫逻辑模块",
+        "language": "Go",
+        "entryPoints": ["main.go"],
+        "keyFiles": [
+          "main.go",
+          "search.go",
+          "product.go",
+          "seller.go",
+          "network.go",
+          "robot.go",
+          "error.go",
+          "time.go"
+        ]
+      },
+      {
+        "path": "/sql",
+        "name": "sql",
+        "description": "数据库脚本",
+        "language": "SQL",
+        "keyFiles": [
+          "ddl.sql",
+          "category.sql"
+        ]
+      }
+    ]
+  },
+  "dependencies": {
+    "go": {
+      "modules": [
+        "github.com/PuerkitoBio/goquery v1.8.1",
+        "github.com/go-sql-driver/mysql v1.7.1",
+        "github.com/tengfei-xy/go-log v0.1.2",
+        "golang.org/x/net v0.7.0",
+        "gopkg.in/yaml.v3 v3.0.1"
+      ]
+    }
+  },
+  "coverage": {
+    "totalFiles": 25,
+    "scannedFiles": 24,
+    "coveragePercent": 96,
+    "ignoredFiles": [
+      ".git/**",
+      ".DS_Store",
+      "*.yaml"
+    ],
+    "gaps": []
+  },
+  "database": {
+    "type": "MySQL",
+    "version": "5.7+ / 8.x+",
+    "databaseName": "amazon",
+    "tables": [
+      "application",
+      "category",
+      "cookie",
+      "product",
+      "search_statistics",
+      "seller"
+    ],
+    "views": [
+      "产品检查表",
+      "商家信息表",
+      "商家trn表",
+      "搜索统计表",
+      "程序状态表",
+      "类别总数表",
+      "占用空间表"
+    ]
+  },
+  "configuration": {
+    "file": "config.yaml",
+    "template": "config.yaml.save",
+    "keySettings": {
+      "mysql": "数据库连接配置",
+      "basic": "基础配置(app_id, host_id, domain)",
+      "proxy": "代理配置(可选)",
+      "exec": "执行配置(启用功能、循环次数)"
+    }
+  },
+  "architecture": {
+    "pattern": "three-stage-pipeline",
+    "stages": [
+      {
+        "name": "search",
+        "file": "search.go",
+        "description": "搜索商品并提取链接",
+        "input": "category 表",
+        "output": "product 表"
+      },
+      {
+        "name": "product",
+        "file": "product.go",
+        "description": "从商品页提取卖家ID",
+        "input": "product 表",
+        "output": "seller 表"
+      },
+      {
+        "name": "seller",
+        "file": "seller.go",
+        "description": "获取卖家详细信息",
+        "input": "seller 表",
+        "output": "seller 表(更新)"
+      }
+    ]
+  },
+  "distributed": {
+    "enabled": true,
+    "mechanism": "app_id + host_id",
+    "app_id": "同一主机下的程序标识",
+    "host_id": "不同主机标识(关联cookie)"
+  },
+  "robotstxt": {
+    "enabled": true,
+    "file": "robot.go",
+    "compliance": "所有请求都经过 robots.txt 检查"
+  },
+  "build": {
+    "tool": "goreleaser",
+    "config": ".goreleaser.yaml",
+    "platforms": ["linux", "windows", "darwin"],
+    "architectures": ["amd64", "arm64"]
+  },
+  "truncated": false,
+  "nextSteps": []
+}

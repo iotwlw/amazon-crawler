@@ -1,10 +1,23 @@
-*.yaml
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+amazon-crawler
 
-dist/
-.claude/index.json
-CLAUDE.md
-amazon-crawler.exe
-.gitignore
+# Output directory
+output/
+
+# Configurations (often contain sensitive info)
+config.yaml
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
 nul
-amazon-crawler.exe~
-cookies.json

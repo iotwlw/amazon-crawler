@@ -71,6 +71,8 @@ type Mysql struct {
 type flagStruct struct {
 	config_file string
 	serve       string // HTTP 服务模式，值为监听地址如 ":8080"
+	asin        string // ASIN 列表，逗号分隔
+	domain      string // 指定亚马逊域名（仅 ASIN 模式有效）
 }
 
 var app appConfig
@@ -165,6 +167,8 @@ func init_flag() flagStruct {
 	var f flagStruct
 	flag.StringVar(&f.config_file, "c", "config.yaml", "打开配置文件")
 	flag.StringVar(&f.serve, "serve", "", "启动 HTTP 服务模式，指定监听地址如 :8080")
+	flag.StringVar(&f.asin, "asin", "", "ASIN 列表，逗号分隔（如：B08N5WRWNW,B07XYZ）")
+	flag.StringVar(&f.domain, "domain", "www.amazon.com.mx", "亚马逊域名（仅 ASIN 模式有效）")
 	flag.Parse()
 	return f
 }
@@ -177,8 +181,17 @@ func main() {
 	init_network()
 	init_signal()
 
-	// 根据是否传入 -serve 参数决定启动模式
-	if f.serve != "" {
+	// 判断运行模式
+	if f.asin != "" {
+		// ASIN 评论爬虫模式
+		log.Infof("启动 ASIN 评论爬虫模式")
+		scraper := NewASINScraper(f.asin, f.domain)
+		if err := scraper.Run(); err != nil {
+			log.Errorf("ASIN 爬虫执行失败: %v", err)
+			os.Exit(1)
+		}
+		return
+	} else if f.serve != "" {
 		// HTTP 服务模式
 		log.Infof("启动 HTTP 服务模式")
 
