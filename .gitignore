@@ -21,3 +21,14 @@ config.yaml
 # Logs
 *.log
 nul
+*.yaml
+
+dist/
+.claude/index.json
+CLAUDE.md
+amazon-crawler.exe
+nul
+amazon-crawler.exe~
+cookies.json
+.spec-workflow/
+tmpclaude-*
