@@ -64,6 +64,18 @@ exec:
 mysql:
   ip: "127.0.0.1"
   port: "3306"
-  username: 
-  password: 
+  username:
+  password:
   database: "taotie"
+
+# 品牌巡查配置
+# 启动方式: ./amazon-crawler -c config.yaml -brand
+brand:
+  # 是否启用品牌巡查
+  enable: true
+  # 每个品牌最多搜索的ASIN数量
+  max_asins: 5
+  # 每批处理的品牌数量
+  batch: 100
+  # 循环次数（0=无限）
+  loop: 0

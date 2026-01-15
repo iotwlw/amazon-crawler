@@ -25,6 +25,7 @@ type appConfig struct {
 	Basic      `yaml:"basic"`
 	Proxy      `yaml:"proxy"`
 	Exec       `yaml:"exec"`
+	Brand      BrandConfig `yaml:"brand"` // 品牌巡查配置
 	db         *sql.DB
 	cookie     string
 	cookieID   int64 // 当前使用的 cookie 记录 ID
@@ -73,6 +74,7 @@ type flagStruct struct {
 	serve       string // HTTP 服务模式，值为监听地址如 ":8080"
 	asin        string // ASIN 列表，逗号分隔
 	domain      string // 指定亚马逊域名（仅 ASIN 模式有效）
+	brand       bool   // 品牌巡查模式
 }
 
 var app appConfig
@@ -169,6 +171,7 @@ func init_flag() flagStruct {
 	flag.StringVar(&f.serve, "serve", "", "启动 HTTP 服务模式，指定监听地址如 :8080")
 	flag.StringVar(&f.asin, "asin", "", "ASIN 列表，逗号分隔（如：B08N5WRWNW,B07XYZ）")
 	flag.StringVar(&f.domain, "domain", "www.amazon.com.mx", "亚马逊域名（仅 ASIN 模式有效）")
+	flag.BoolVar(&f.brand, "brand", false, "启动品牌巡查模式")
 	flag.Parse()
 	return f
 }
@@ -182,7 +185,11 @@ func main() {
 	init_signal()
 
 	// 判断运行模式
-	if f.asin != "" {
+	if f.brand {
+		// 品牌巡查模式
+		brandMain()
+		return
+	} else if f.asin != "" {
 		// ASIN 评论爬虫模式
 		log.Infof("启动 ASIN 评论爬虫模式")
 		scraper := NewASINScraper(f.asin, f.domain)
