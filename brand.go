@@ -56,6 +56,21 @@ func brandMain() {
 	log.Info("启动品牌巡查模式")
 	log.Info("========================")
 
+	// 恢复上次中断的任务：将当前 app_id 的"处理中"状态重置为"待处理"
+	result, err := app.db.Exec(`
+		UPDATE available_brand_domains
+		SET patrol_status = ?
+		WHERE patrol_status = ? AND patrol_app_id = ?
+	`, BRAND_PATROL_PENDING, BRAND_PATROL_PROCESSING, app.Basic.App_id)
+	if err != nil {
+		log.Errorf("重置中断任务失败: %v", err)
+	} else {
+		affected, _ := result.RowsAffected()
+		if affected > 0 {
+			log.Infof("恢复上次中断的 %d 个任务", affected)
+		}
+	}
+
 	maxASINs := app.Brand.MaxASINs
 	if maxASINs == 0 {
 		maxASINs = 5
@@ -215,7 +230,10 @@ func (b *brandStruct) processWithSearch(maxASINs int) error {
 
 	log.Infof("搜索到 %d 个ASIN: %v", len(b.asins), b.asins)
 
-	// 2. 处理搜索到的ASIN
+	// 2. 保存ASIN到产品表
+	b.saveASINsToProduct()
+
+	// 3. 处理搜索到的ASIN
 	for _, asin := range b.asins {
 		log.Infof("访问ASIN: %s", asin)
 		if err := b.fetchProductPage(asin); err != nil {
@@ -259,6 +277,21 @@ func (b *brandStruct) extractASINs(doc *goquery.Document, maxASINs int) {
 			b.asins = append(b.asins, asin)
 		}
 	})
+}
+
+// saveASINsToProduct 将搜索到的ASIN保存到产品表
+func (b *brandStruct) saveASINsToProduct() {
+	for _, asin := range b.asins {
+		productURL := fmt.Sprintf("https://%s/dp/%s", app.Domain, asin)
+		_, err := app.db.Exec(`
+			INSERT INTO amc_product (url, param, asin, keyword, brand_name, status, app)
+			VALUES (?, '', ?, ?, ?, 0, ?)
+			ON DUPLICATE KEY UPDATE brand_name = VALUES(brand_name)
+		`, productURL, asin, b.brandName, b.brandName, app.Basic.App_id)
+		if err != nil {
+			log.Warnf("保存ASIN %s 到产品表失败: %v", asin, err)
+		}
+	}
 }
 
 // fetchProductPage 访问商品页提取卖家信息
