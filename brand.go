@@ -50,11 +50,18 @@ type brandStruct struct {
 	fbLifetime     int
 }
 
+// 品牌巡查连续失败计数
+var brandConsecutiveFailures int
+const BRAND_MAX_CONSECUTIVE_FAILURES = 10 // 连续失败10次后退出
+
 // brandMain 品牌巡查主入口
 func brandMain() {
 	log.Info("========================")
 	log.Info("启动品牌巡查模式")
 	log.Info("========================")
+
+	// 重置连续失败计数
+	brandConsecutiveFailures = 0
 
 	// 恢复上次中断的任务：将当前 app_id 的"处理中"状态重置为"待处理"
 	result, err := app.db.Exec(`
@@ -165,14 +172,38 @@ func processBrandBatch(batch int, maxASINs int) int {
 		// 处理品牌
 		err := b.process(maxASINs)
 		if err != nil {
-			log.Errorf("处理品牌 %s 失败: %v", b.brandName, err)
-			b.updateStatus(BRAND_PATROL_FAILED, err.Error())
+			// 检查是否是 503 或验证错误
+			if err == ERROR_NOT_503 {
+				log.Errorf("遇到503错误，等待120秒后重试")
+				sleep(120)
+				brandConsecutiveFailures++
+				b.updateStatus(BRAND_PATROL_PENDING, "") // 重置为待处理
+			} else if err == ERROR_VERIFICATION {
+				log.Errorf("Cookie验证页面，等待300秒")
+				sleep(300)
+				brandConsecutiveFailures++
+				b.updateStatus(BRAND_PATROL_PENDING, "") // 重置为待处理
+			} else {
+				log.Errorf("处理品牌 %s 失败: %v", b.brandName, err)
+				b.updateStatus(BRAND_PATROL_FAILED, err.Error())
+				brandConsecutiveFailures++ // 其他错误也计入
+			}
 		} else if b.sellerID == "" {
 			log.Warnf("品牌 %s 未找到卖家", b.brandName)
 			b.updateStatus(BRAND_PATROL_NO_RESULT, "未找到卖家")
+			// 无结果不算失败，重置计数
+			brandConsecutiveFailures = 0
 		} else {
 			log.Infof("品牌 %s 巡查完成, seller_id=%s", b.brandName, b.sellerID)
 			b.updateStatus(BRAND_PATROL_COMPLETED, "")
+			// 成功，重置计数
+			brandConsecutiveFailures = 0
+		}
+
+		// 检查连续失败次数
+		if brandConsecutiveFailures >= BRAND_MAX_CONSECUTIVE_FAILURES {
+			log.Errorf("连续失败 %d 次，退出品牌巡查", brandConsecutiveFailures)
+			return processed
 		}
 
 		processed++
@@ -257,13 +288,30 @@ func (b *brandStruct) search(maxASINs int) error {
 		return fmt.Errorf("robots.txt 不允许: %v", err)
 	}
 
-	doc, err := b.request(searchURL)
-	if err != nil {
-		return err
+	// 重试机制：遇到 503 时重试
+	maxRetries := 3
+	for i := 0; i < maxRetries; i++ {
+		if i > 0 {
+			log.Infof("第 %d 次重试搜索品牌: %s", i, b.brandName)
+			sleep(60) // 重试前等待60秒
+		}
+
+		doc, err := b.request(searchURL)
+		if err != nil {
+			// 503 和验证错误重试，其他错误直接返回
+			if err == ERROR_NOT_503 || err == ERROR_VERIFICATION {
+				if i < maxRetries-1 {
+					continue // 重试
+				}
+			}
+			return err
+		}
+
+		b.extractASINs(doc, maxASINs)
+		return nil // 成功，退出重试循环
 	}
 
-	b.extractASINs(doc, maxASINs)
-	return nil
+	return fmt.Errorf("搜索品牌 %s 失败，超过最大重试次数", b.brandName)
 }
 
 // extractASINs 从搜索结果提取ASIN
@@ -302,23 +350,40 @@ func (b *brandStruct) fetchProductPage(asin string) error {
 		return fmt.Errorf("robots.txt 不允许: %v", err)
 	}
 
-	doc, err := b.request(productURL)
-	if err != nil {
-		return err
+	// 重试机制：遇到 503 时重试
+	maxRetries := 3
+	for i := 0; i < maxRetries; i++ {
+		if i > 0 {
+			log.Infof("第 %d 次重试访问ASIN: %s", i, asin)
+			sleep(60) // 重试前等待60秒
+		}
+
+		doc, err := b.request(productURL)
+		if err != nil {
+			// 503 和验证错误重试，其他错误直接返回
+			if err == ERROR_NOT_503 || err == ERROR_VERIFICATION {
+				if i < maxRetries-1 {
+					continue // 重试
+				}
+			}
+			return err
+		}
+
+		// 提取卖家链接
+		sellerLink := doc.Find("a#sellerProfileTriggerId").First()
+		if sellerLink.Length() == 0 {
+			return ERROR_NOT_SELLER_URL
+		}
+
+		href, _ := sellerLink.Attr("href")
+		b.sellerID = extractSellerID(href)
+		b.sellerName = strings.TrimSpace(sellerLink.Text())
+		b.shopName = b.sellerName
+
+		return nil // 成功，退出重试循环
 	}
 
-	// 提取卖家链接
-	sellerLink := doc.Find("a#sellerProfileTriggerId").First()
-	if sellerLink.Length() == 0 {
-		return ERROR_NOT_SELLER_URL
-	}
-
-	href, _ := sellerLink.Attr("href")
-	b.sellerID = extractSellerID(href)
-	b.sellerName = strings.TrimSpace(sellerLink.Text())
-	b.shopName = b.sellerName
-
-	return nil
+	return fmt.Errorf("访问ASIN %s 失败，超过最大重试次数", asin)
 }
 
 // extractSellerID 从URL中提取seller ID
@@ -346,16 +411,33 @@ func (b *brandStruct) fetchSellerInfo() error {
 		return fmt.Errorf("robots.txt 不允许: %v", err)
 	}
 
-	doc, err := b.request(sellerURL)
-	if err != nil {
-		return err
+	// 重试机制：遇到 503 时重试
+	maxRetries := 3
+	for i := 0; i < maxRetries; i++ {
+		if i > 0 {
+			log.Infof("第 %d 次重试访问卖家页面: %s", i, b.sellerID)
+			sleep(60) // 重试前等待60秒
+		}
+
+		doc, err := b.request(sellerURL)
+		if err != nil {
+			// 503 和验证错误重试，其他错误直接返回
+			if err == ERROR_NOT_503 || err == ERROR_VERIFICATION {
+				if i < maxRetries-1 {
+					continue // 重试
+				}
+			}
+			return err
+		}
+
+		// 提取卖家信息（复用 seller.go 的解析逻辑）
+		b.extractSellerDetails(doc)
+
+		// 写入 tb_amazon_shop 表
+		return b.saveToAmazonShop()
 	}
 
-	// 提取卖家信息（复用 seller.go 的解析逻辑）
-	b.extractSellerDetails(doc)
-
-	// 写入 tb_amazon_shop 表
-	return b.saveToAmazonShop()
+	return fmt.Errorf("访问卖家页面 %s 失败，超过最大重试次数", b.sellerID)
 }
 
 // extractSellerDetails 从卖家页面提取详细信息
