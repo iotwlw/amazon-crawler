@@ -141,14 +141,39 @@ func init_mysql() {
 func init_network() {
 	log.Info("网络测试开始")
 
-	var s searchStruct
-	s.en_key = "Hardware+electrician"
-	_, err := s.request(0)
-	if err != nil {
-		log.Error("网络错误")
+	maxRetries := 3 // 最大重试次数
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			log.Infof("网络测试重试 %d/%d", attempt, maxRetries)
+		}
+
+		var s searchStruct
+		s.en_key = "Hardware+electrician"
+		_, err := s.request(0)
+		if err == nil {
+			log.Info("网络测试通过")
+			return
+		}
+
+		// 检查是否是验证失败错误
+		if err == ERROR_VERIFICATION {
+			log.Warnf("检测到 Cookie 需要验证，尝试获取新的 Cookie (尝试 %d/%d)", attempt, maxRetries)
+			if handleErr := app.handleCookieInvalid(); handleErr != nil {
+				log.Errorf("获取新 Cookie 失败: %v", handleErr)
+				log.Error("网络错误")
+				panic(err)
+			}
+			// 成功获取新 Cookie，继续下一次尝试
+			continue
+		}
+
+		// 其他错误直接 panic
+		log.Errorf("网络错误: %v", err)
 		panic(err)
 	}
 
+	log.Error("网络测试失败，已达最大重试次数")
+	panic(fmt.Errorf("网络测试失败，请检查网络或获取新的 Cookie"))
 }
 func init_signal() {
 	// 创建一个通道来接收操作系统的信号
