@@ -607,6 +607,11 @@ func crawlProductsFromMemory(products []*ProductInfo, keyword string) (map[strin
 	// 使用 map 进行 seller_id 去重
 	sellerMap := make(map[string]*SellerInfo)
 
+	consecutive503Count := 0      // 连续503次数
+	cookieSwitchCount := 0        // 已切换cookie次数
+	const max503BeforeSwitch = 3  // 连续3次503后切换cookie
+	const maxCookieSwitches = 1   // 最多切换1次cookie
+
 	for _, p := range products {
 		// 构建完整URL
 		fullURL := "https://" + app.Domain + p.URL + p.Param
@@ -622,7 +627,7 @@ func crawlProductsFromMemory(products []*ProductInfo, keyword string) (map[strin
 		sellerID, sellerName, brandName, err := fetchSellerInfoFromProduct(fullURL)
 		if err != nil {
 			if err == ERROR_VERIFICATION {
-				log.Errorf("Cookie 验证失败，尝试获取新 Cookie: %v", err)
+				log.Errorf("Cookie 验证失败，尝试获取新 Cookie")
 				if handleErr := app.handleCookieInvalid(); handleErr != nil {
 					log.Errorf("获取新 Cookie 失败: %v", handleErr)
 				}
@@ -632,6 +637,26 @@ func crawlProductsFromMemory(products []*ProductInfo, keyword string) (map[strin
 					log.Errorf("重试后仍然失败: %v", err)
 					continue
 				}
+			} else if err == ERROR_NOT_503 {
+				consecutive503Count++
+				log.Errorf("遇到503错误 (连续第%d次)", consecutive503Count)
+
+				// 连续3次503，尝试切换cookie
+				if consecutive503Count >= max503BeforeSwitch {
+					if cookieSwitchCount < maxCookieSwitches {
+						log.Warnf("连续%d次503，尝试切换Cookie", max503BeforeSwitch)
+						if handleErr := app.handleCookieInvalid(); handleErr != nil {
+							log.Errorf("获取新 Cookie 失败: %v", handleErr)
+						}
+						cookieSwitchCount++
+						consecutive503Count = 0 // 重置503计数
+						log.Infof("Cookie 已切换 (第%d次)，继续处理", cookieSwitchCount)
+					} else {
+						log.Errorf("已切换%d次Cookie后仍连续出现503，暂停任务", cookieSwitchCount)
+						return nil, fmt.Errorf("连续503错误过多，任务暂停")
+					}
+				}
+				continue
 			} else if err == ERROR_NOT_SELLER_URL {
 				log.Infof("商品没有卖家链接: %s", p.ASIN)
 				continue
@@ -640,6 +665,9 @@ func crawlProductsFromMemory(products []*ProductInfo, keyword string) (map[strin
 				continue
 			}
 		}
+
+		// 成功后重置503计数
+		consecutive503Count = 0
 
 		// 如果没有 seller_id 且没有品牌名，跳过
 		if sellerID == "" && brandName == "" {
@@ -694,7 +722,14 @@ func fetchSellerInfoFromProduct(productURL string) (sellerID, sellerName, brandN
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
+	switch resp.StatusCode {
+	case 200:
+		// OK
+	case 404:
+		return "", "", "", ERROR_NOT_404
+	case 503:
+		return "", "", "", ERROR_NOT_503
+	default:
 		return "", "", "", fmt.Errorf("状态码:%d", resp.StatusCode)
 	}
 
@@ -756,6 +791,11 @@ func fetchSellerDetails(sellerMap map[string]*SellerInfo) ([]*SellerDetail, erro
 
 	details := make([]*SellerDetail, 0, len(sellerMap))
 
+	consecutive503Count := 0      // 连续503次数
+	cookieSwitchCount := 0        // 已切换cookie次数
+	const max503BeforeSwitch = 3  // 连续3次503后切换cookie
+	const maxCookieSwitches = 1   // 最多切换1次cookie
+
 	for sellerID, info := range sellerMap {
 		sellerURL := fmt.Sprintf("https://%s/sp?ie=UTF8&seller=%s", app.Domain, sellerID)
 
@@ -769,7 +809,7 @@ func fetchSellerDetails(sellerMap map[string]*SellerInfo) ([]*SellerDetail, erro
 		detail, err := fetchSellerDetailFromPage(sellerURL, info)
 		if err != nil {
 			if err == ERROR_VERIFICATION {
-				log.Errorf("Cookie 验证失败，尝试获取新 Cookie: %v", err)
+				log.Errorf("Cookie 验证失败，尝试获取新 Cookie")
 				if handleErr := app.handleCookieInvalid(); handleErr != nil {
 					log.Errorf("获取新 Cookie 失败: %v", handleErr)
 				}
@@ -779,20 +819,37 @@ func fetchSellerDetails(sellerMap map[string]*SellerInfo) ([]*SellerDetail, erro
 					log.Errorf("重试后仍然失败: %v", err)
 					continue
 				}
-			} else if err == ERROR_NOT_404 || err == ERROR_NOT_503 {
-				log.Errorf("请求失败: %v", err)
-				sleep(120)
-				// 重试
-				detail, err = fetchSellerDetailFromPage(sellerURL, info)
-				if err != nil {
-					log.Errorf("重试后仍然失败: %v", err)
-					continue
+			} else if err == ERROR_NOT_503 {
+				consecutive503Count++
+				log.Errorf("遇到503错误 (连续第%d次)", consecutive503Count)
+
+				// 连续3次503，尝试切换cookie
+				if consecutive503Count >= max503BeforeSwitch {
+					if cookieSwitchCount < maxCookieSwitches {
+						log.Warnf("连续%d次503，尝试切换Cookie", max503BeforeSwitch)
+						if handleErr := app.handleCookieInvalid(); handleErr != nil {
+							log.Errorf("获取新 Cookie 失败: %v", handleErr)
+						}
+						cookieSwitchCount++
+						consecutive503Count = 0 // 重置503计数
+						log.Infof("Cookie 已切换 (第%d次)，继续处理", cookieSwitchCount)
+					} else {
+						log.Errorf("已切换%d次Cookie后仍连续出现503，暂停任务", cookieSwitchCount)
+						return nil, fmt.Errorf("连续503错误过多，任务暂停")
+					}
 				}
+				continue
+			} else if err == ERROR_NOT_404 {
+				log.Errorf("请求失败 404: %v", err)
+				continue
 			} else {
 				log.Errorf("获取卖家详情失败: %v", err)
 				continue
 			}
 		}
+
+		// 成功后重置503计数
+		consecutive503Count = 0
 
 		details = append(details, detail)
 		log.Infof("卖家详情获取成功: ID=%s, Name=%s, Address=%s, TRN=%s",
