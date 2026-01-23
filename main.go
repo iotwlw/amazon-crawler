@@ -201,6 +201,17 @@ func init_flag() flagStruct {
 	return f
 }
 
+// normalizeString 规范化字符串用于比较（转小写并移除空格和特殊字符）
+func normalizeString(s string) string {
+	s = strings.ToLower(s)
+	s = strings.ReplaceAll(s, " ", "")
+	s = strings.ReplaceAll(s, "-", "")
+	s = strings.ReplaceAll(s, "&", "")
+	s = strings.ReplaceAll(s, ",", "")
+	s = strings.ReplaceAll(s, ".", "")
+	return s
+}
+
 func main() {
 	f := init_flag()
 	init_config(f)

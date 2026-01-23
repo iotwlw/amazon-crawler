@@ -53,6 +53,7 @@ type brandStruct struct {
 
 // 品牌巡查连续失败计数
 var brandConsecutiveFailures int
+
 const BRAND_MAX_CONSECUTIVE_FAILURES = 10 // 连续失败10次后退出
 
 // brandMain 品牌巡查主入口
@@ -339,13 +340,59 @@ func (b *brandStruct) fetchProductPage(asin string) error {
 		return err
 	}
 
-	// 提取卖家链接
-	sellerLink := doc.Find("a#sellerProfileTriggerId").First()
-	if sellerLink.Length() == 0 {
+	// 提取卖家链接 - 尝试多个选择器
+	var sellerLink *goquery.Selection
+	selectors := []string{
+		"a[id=sellerProfileTriggerId]",
+		"a#sellerProfileTriggerId",
+		"#sellerProfileTriggerId",
+		"div#merchant-info a",
+		"div#tabular-buybox-container a",
+		"#merchant-info a",
+		"a[href*='seller=']",
+		"span.tabular-buybox-text a",
+		"div.tabular-buybox-container a",
+		"#vse-seller-link",
+	}
+
+	var href string
+	var foundLink bool
+	for _, selector := range selectors {
+		doc.Find(selector).Each(func(i int, s *goquery.Selection) {
+			if foundLink {
+				return
+			}
+			h, e := s.Attr("href")
+			if e && strings.Contains(h, "seller=") {
+				sellerLink = s
+				href = h
+				foundLink = true
+			}
+		})
+		if foundLink {
+			break
+		}
+	}
+
+	// 兜底方案：遍历所有 a 标签寻找包含 seller= 的链接
+	if !foundLink {
+		doc.Find("a").Each(func(i int, s *goquery.Selection) {
+			if foundLink {
+				return
+			}
+			h, e := s.Attr("href")
+			if e && strings.Contains(h, "seller=") {
+				sellerLink = s
+				href = h
+				foundLink = true
+			}
+		})
+	}
+
+	if !foundLink {
 		return ERROR_NOT_SELLER_URL
 	}
 
-	href, _ := sellerLink.Attr("href")
 	b.sellerID = extractSellerID(href)
 	b.sellerName = strings.TrimSpace(sellerLink.Text())
 	b.shopName = b.sellerName
@@ -355,6 +402,14 @@ func (b *brandStruct) fetchProductPage(asin string) error {
 
 // extractSellerID 从URL中提取seller ID
 func extractSellerID(href string) string {
+	// 尝试解析为 URL
+	u, err := url.Parse(href)
+	if err == nil {
+		if sellerID := u.Query().Get("seller"); sellerID != "" {
+			return sellerID
+		}
+	}
+
 	// URL 格式: /sp?seller=XXXXX 或 /sp?ie=UTF8&seller=XXXXX
 	if strings.Contains(href, "seller=") {
 		parts := strings.Split(href, "seller=")

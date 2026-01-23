@@ -607,10 +607,12 @@ func crawlProductsFromMemory(products []*ProductInfo, keyword string) (map[strin
 	// 使用 map 进行 seller_id 去重
 	sellerMap := make(map[string]*SellerInfo)
 
-	consecutive503Count := 0      // 连续503次数
-	cookieSwitchCount := 0        // 已切换cookie次数
-	const max503BeforeSwitch = 3  // 连续3次503后切换cookie
-	const maxCookieSwitches = 1   // 最多切换1次cookie
+	normalizedKeyword := normalizeString(keyword)
+
+	consecutive503Count := 0     // 连续503次数
+	cookieSwitchCount := 0       // 已切换cookie次数
+	const max503BeforeSwitch = 3 // 连续3次503后切换cookie
+	const maxCookieSwitches = 1  // 最多切换1次cookie
 
 	for _, p := range products {
 		// 构建完整URL
@@ -676,7 +678,7 @@ func crawlProductsFromMemory(products []*ProductInfo, keyword string) (map[strin
 		}
 
 		// 如果品牌名与关键词相同且存在卖家ID，记录卖家
-		if strings.ToLower(keyword) == strings.ToLower(brandName) && sellerID != "" {
+		if (normalizedKeyword == normalizeString(brandName) || strings.Contains(normalizeString(brandName), normalizedKeyword)) && sellerID != "" {
 			if existing, found := sellerMap[sellerID]; found {
 				// 卖家已存在，更新信息
 				if existing.SellerName == "" && sellerName != "" {
@@ -690,6 +692,10 @@ func crawlProductsFromMemory(products []*ProductInfo, keyword string) (map[strin
 					Keyword:    keyword,
 				}
 				log.Infof("发现新卖家: ID=%s, Name=%s", sellerID, sellerName)
+			}
+		} else {
+			if sellerID != "" {
+				log.Infof("跳过卖家 (品牌不匹配): ID=%s, Brand=%s, Keyword=%s", sellerID, brandName, keyword)
 			}
 		}
 	}
@@ -743,42 +749,124 @@ func fetchSellerInfoFromProduct(productURL string) (sellerID, sellerName, brandN
 		return "", "", "", ERROR_VERIFICATION
 	}
 
-	// 提取卖家链接
-	sellerLink := doc.Find("a[id=sellerProfileTriggerId]").First()
-	href, exist := sellerLink.Attr("href")
+	// 提取卖家链接 - 尝试多个选择器
+	var sellerSelection *goquery.Selection
+	selectors := []string{
+		"a[id=sellerProfileTriggerId]",
+		"a#sellerProfileTriggerId",
+		"#sellerProfileTriggerId",
+		"div#merchant-info a",
+		"div#tabular-buybox-container a",
+		"#merchant-info a",
+		"a[href*='seller=']",
+		"span.tabular-buybox-text a",
+		"div.tabular-buybox-container a",
+		"#vse-seller-link",
+	}
+
+	var href string
+	var exist bool
+	for _, selector := range selectors {
+		doc.Find(selector).Each(func(i int, s *goquery.Selection) {
+			if exist {
+				return
+			}
+			h, e := s.Attr("href")
+			if e && strings.Contains(h, "seller=") {
+				sellerSelection = s
+				href = h
+				exist = true
+			}
+		})
+		if exist {
+			break
+		}
+	}
+
+	// 兜底方案：遍历所有 a 标签寻找包含 seller= 的链接
+	if !exist {
+		doc.Find("a").Each(func(i int, s *goquery.Selection) {
+			if exist {
+				return
+			}
+			h, e := s.Attr("href")
+			if e && strings.Contains(h, "seller=") {
+				sellerSelection = s
+				href = h
+				exist = true
+			}
+		})
+	}
+
 	if !exist {
 		return "", "", "", ERROR_NOT_SELLER_URL
 	}
 
 	// 提取卖家名称
-	sellerName = strings.TrimSpace(sellerLink.Text())
+	sellerName = strings.TrimSpace(sellerSelection.Text())
 
 	// 从 href 中提取 seller_id
-	for _, part := range strings.Split(href, "&") {
-		if strings.HasPrefix(part, "seller=") {
-			sellerID = strings.Split(part, "seller=")[1]
-			break
+	u, err := url.Parse(href)
+	if err == nil {
+		sellerID = u.Query().Get("seller")
+	}
+	if sellerID == "" {
+		for _, part := range strings.Split(href, "&") {
+			if strings.HasPrefix(part, "seller=") {
+				sellerID = strings.Split(part, "seller=")[1]
+				break
+			}
+			if strings.Contains(part, "?seller=") {
+				parts := strings.Split(part, "?seller=")
+				if len(parts) > 1 {
+					sellerPart := parts[1]
+					if idx := strings.Index(sellerPart, "&"); idx > 0 {
+						sellerPart = sellerPart[:idx]
+					}
+					sellerID = sellerPart
+					break
+				}
+			}
 		}
 	}
 
-	// 提取品牌名
-	bylineInfo := doc.Find("a[id=bylineInfo]").First()
-	if bylineInfo.Length() > 0 {
-		brandText := strings.TrimSpace(bylineInfo.Text())
-		if strings.Contains(brandText, "Brand:") {
-			brandName = strings.TrimSpace(strings.ReplaceAll(brandText, "Brand:", ""))
-		} else if strings.Contains(brandText, "Visit the") && strings.Contains(brandText, "Store") {
-			parts := strings.Split(brandText, "Visit the")
-			if len(parts) > 1 {
-				brandPart := strings.Split(parts[1], "Store")
-				if len(brandPart) > 0 {
-					brandName = strings.TrimSpace(brandPart[0])
+	// 提取品牌名 - 尝试多个选择器
+	brandSelectors := []string{
+		"a[id=bylineInfo]",
+		"div#bylineInfo_feature_div a",
+		"a#brand",
+		"div#brandByline_feature_div a",
+		"a.a-link-normal.bylineInfo",
+		"#bylineInfo",
+		"#brandByline_feature_div",
+		"a.contributorNameID",
+		"[data-brand]",
+	}
+
+	for _, selector := range brandSelectors {
+		bylineInfo := doc.Find(selector).First()
+		if bylineInfo.Length() > 0 {
+			brandText := strings.TrimSpace(bylineInfo.Text())
+			if brandText != "" {
+				if strings.Contains(brandText, "Brand:") {
+					brandName = strings.TrimSpace(strings.ReplaceAll(brandText, "Brand:", ""))
+				} else if strings.Contains(brandText, "Visit the") && strings.Contains(brandText, "Store") {
+					parts := strings.Split(brandText, "Visit the")
+					if len(parts) > 1 {
+						brandPart := strings.Split(parts[1], "Store")
+						if len(brandPart) > 0 {
+							brandName = strings.TrimSpace(brandPart[0])
+						}
+					}
+				} else {
+					brandName = brandText
+				}
+				if brandName != "" {
+					brandName = strings.ToLower(brandName)
+					break
 				}
 			}
-		} else {
-			brandName = brandText
 		}
-		brandName = strings.ToLower(brandName)
 	}
 
 	return sellerID, sellerName, brandName, nil
@@ -791,10 +879,10 @@ func fetchSellerDetails(sellerMap map[string]*SellerInfo) ([]*SellerDetail, erro
 
 	details := make([]*SellerDetail, 0, len(sellerMap))
 
-	consecutive503Count := 0      // 连续503次数
-	cookieSwitchCount := 0        // 已切换cookie次数
-	const max503BeforeSwitch = 3  // 连续3次503后切换cookie
-	const maxCookieSwitches = 1   // 最多切换1次cookie
+	consecutive503Count := 0     // 连续503次数
+	cookieSwitchCount := 0       // 已切换cookie次数
+	const max503BeforeSwitch = 3 // 连续3次503后切换cookie
+	const maxCookieSwitches = 1  // 最多切换1次cookie
 
 	for sellerID, info := range sellerMap {
 		sellerURL := fmt.Sprintf("https://%s/sp?ie=UTF8&seller=%s", app.Domain, sellerID)
