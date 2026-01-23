@@ -59,8 +59,6 @@ exec:
   # 2 搜索次数少优先
   search_priority: 1
 
-# 务必初始化，初始化的ddl文件参考本目录下的sql/文件夹
-# 关键词的初始化参考sql/cateogory.sql
 mysql:
   ip: "127.0.0.1"
   port: "3306"
