@@ -221,9 +221,31 @@ goreleaser build
 
 ## 数据模型
 
+### 业务模式说明
+
+> **重要变更**: 程序已从「关键词搜索」改为「品牌搜索」模式
+
+原设计是通过关键词搜索商品，现改为通过品牌名搜索该品牌下的所有商品和卖家。
+
+### 核心字段映射（品牌名）
+
+品牌名是贯穿整个数据流的核心标识，在不同表中的字段名不同但值相同：
+
+| 表名 | 字段名 | 说明 |
+|------|--------|------|
+| amc_category | en_key | 品牌名（原字段名为"英文关键词"） |
+| amc_product | keyword | 品牌名（商品来源品牌） |
+| tb_amazon_shop | domain | 品牌名（店铺所属品牌） |
+
+```
+数据流转：
+amc_category.en_key ──搜索──> amc_product.keyword ──同步──> tb_amazon_shop.domain
+      (品牌名)                    (品牌名)                      (品牌名)
+```
+
 ### 核心表结构
 
-> **注意**: 所有表名均以 `amc_` 为前缀（Amazon Crawler 缩写）
+> **注意**: 所有表名均以 `amc_` 为前缀（Amazon Crawler 缩写），`tb_amazon_shop` 为外部同步表
 
 #### amc_category - 搜索关键词表
 ```sql
@@ -314,6 +336,75 @@ updated_at  datetime    更新时间
    - 将当前 Cookie 标记为失效（`status = 0`）
    - 自动从未分配池获取新的 Cookie 并绑定到当前 `host_id`
 5. 如果没有可用的未分配 Cookie，程序会提示需要通过 SKILL 获取新的 Session
+
+#### tb_amazon_shop - 亚马逊店铺表（外部同步）
+```sql
+id                      int          主键，自增
+user_id                 int          用户ID（固定为1）
+domain                  varchar      品牌名（核心关联字段）
+shop_id                 varchar      店铺ID，即 seller_id（核心关联字段）
+shop_name               varchar      店铺名称
+shop_url                varchar      店铺URL
+marketplace             varchar      市场（如 "US"）
+company_name            varchar      公司名称
+company_address         varchar      公司地址
+fb_1month               int          1个月反馈数
+fb_3month               int          3个月反馈数
+fb_12month              int          12个月反馈数
+fb_lifetime             int          总反馈数
+main_products           varchar      主营产品
+avg_price               decimal      平均价格
+estimated_monthly_sales int          预估月销量
+crawl_time              datetime     爬取时间
+create_time             datetime     创建时间
+update_time             datetime     更新时间
+唯一索引: (domain, shop_id)
+```
+
+**数据写入来源**：
+- `seller.go`: 卖家信息获取完成后同步，domain = seller.keyword（品牌名）
+- `brand.go`: 品牌巡查获取店铺信息后，domain = brandName（品牌名）
+
+### 表关联关系
+
+```
+┌─────────────────┐
+│  amc_category   │ ─────────────────────────────────────┐
+│   (品牌列表)     │                                      │
+│  en_key=品牌名   │                                      │
+└────────┬────────┘                                      │
+         │ id                                            │
+         │                                               │
+         ▼ category_id                                   │ en_key → keyword (品牌名)
+┌─────────────────┐                              ┌───────▼─────────┐
+│amc_search_stats │                              │   amc_product   │
+│   (搜索统计)     │                              │     (商品)      │
+└─────────────────┘                              │ keyword=品牌名   │
+                                                 └────────┬────────┘
+                                                          │ seller_id
+                                                          │
+                                                          ▼ seller_id
+                                                 ┌─────────────────┐
+                                                 │   amc_seller    │
+                                                 │     (卖家)      │
+                                                 └────────┬────────┘
+                                                          │ 同步
+                                                          ▼
+                                                 ┌─────────────────┐
+                                                 │ tb_amazon_shop  │
+                                                 │  (外部店铺表)    │
+                                                 │ domain=品牌名    │
+                                                 │ shop_id=卖家ID   │
+                                                 └─────────────────┘
+```
+
+**核心关联总结**：
+| 关联类型 | 源表.字段 | 目标表.字段 | 关联值 |
+|----------|-----------|-------------|--------|
+| 品牌名传递 | amc_category.en_key | amc_product.keyword | 品牌名 |
+| 品牌名传递 | amc_product.keyword | tb_amazon_shop.domain | 品牌名 |
+| 卖家ID关联 | amc_product.seller_id | amc_seller.seller_id | 卖家ID |
+| 卖家ID关联 | amc_seller.seller_id | tb_amazon_shop.shop_id | 卖家ID |
 
 ### 数据库视图
 - `产品检查表`: amc_product 表状态统计

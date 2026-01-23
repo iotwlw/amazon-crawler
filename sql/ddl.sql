@@ -148,8 +148,12 @@ CREATE TABLE `amc_category` (
   `zh_key` varchar(30) NOT NULL,
   `en_key` varchar(50) NOT NULL,
   `priority` int(11) DEFAULT '0',
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=1016 DEFAULT CHARSET=utf8;
+  `task_status` tinyint(1) NOT NULL DEFAULT '0',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_task_status` (`task_status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -160,10 +164,18 @@ DROP TABLE IF EXISTS `amc_cookie`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `amc_cookie` (
-  `host_id` tinyint(1) NOT NULL,
-  `cookie` text,
-  PRIMARY KEY (`host_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `host_id` tinyint(1) DEFAULT NULL,
+  `cookie` text NOT NULL,
+  `zipcode` varchar(10) DEFAULT NULL,
+  `city` varchar(50) DEFAULT NULL,
+  `status` tinyint(1) NOT NULL DEFAULT '1',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_host_id` (`host_id`),
+  KEY `idx_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Amazon Cookie Session表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -210,9 +222,8 @@ CREATE TABLE `amc_search_statistics` (
   `app` tinyint(1) NOT NULL,
   `valid` int(11) DEFAULT '0',
   PRIMARY KEY (`id`),
-  KEY `category_id` (`category_id`),
-  CONSTRAINT `amc_search_statistics_ibfk_1` FOREIGN KEY (`category_id`) REFERENCES `amc_category` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2352 DEFAULT CHARSET=utf8;
+  KEY `idx_category_id` (`category_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --

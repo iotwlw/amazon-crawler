@@ -73,7 +73,11 @@ func (s *searchStruct) main() error {
 			case ERROR_NOT_404:
 			case ERROR_NOT_503:
 				s.start--
-				sleep(120)
+				log.Warn("遇到503错误，尝试获取新的Cookie")
+				if handleErr := app.handleCookieInvalid(); handleErr != nil {
+					log.Errorf("获取新Cookie失败: %v，等待120秒后重试", handleErr)
+					sleep(120)
+				}
 				continue
 
 			default:
@@ -188,6 +192,18 @@ func (s *searchStruct) request(seq int) (*goquery.Document, error) {
 	if err != nil {
 		return nil, fmt.Errorf("内部错误:%v", err)
 	}
+
+	// 检测验证页面（亚马逊会要求人机验证）
+	title := doc.Find("title").Text()
+	if strings.Contains(title, "Enter the characters you see below") ||
+		strings.Contains(title, "Type the characters you see in this image") ||
+		strings.Contains(title, "Robot check") ||
+		doc.Find("form[action*=/captcha/").Length() > 0 ||
+		doc.Find("[method=post]").Find("input[type=text][name*=field-keywords]").Length() > 0 {
+		log.Warn("检测到验证页面，Cookie 可能已失效")
+		return nil, ERROR_VERIFICATION
+	}
+
 	return doc, nil
 }
 

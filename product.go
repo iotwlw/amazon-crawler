@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -119,7 +120,7 @@ func (product *productStruct) main() error {
 			continue
 		}
 
-		if strings.ToLower(currentKeyword) == strings.ToLower(currentBrandName) && currentSellerID != "" {
+		if (normalizeString(currentKeyword) == normalizeString(currentBrandName) || strings.Contains(normalizeString(currentBrandName), normalizeString(currentKeyword))) && currentSellerID != "" {
 			err = product.insert_selll_id(currentSellerID, currentSellerName, currentKeyword)
 			if is_duplicate_entry(err) {
 				log.Infof("店铺已存在 商家ID:%s", currentSellerID)
@@ -194,44 +195,107 @@ func (product *productStruct) request(url string) error {
 		return ERROR_VERIFICATION
 	}
 
-	res := doc.Find("a[id=sellerProfileTriggerId]").First()
+	// 提取卖家链接 - 尝试多个选择器
+	var sellerLink *goquery.Selection
+	selectors := []string{
+		"a[id=sellerProfileTriggerId]",
+		"a#sellerProfileTriggerId",
+		"#sellerProfileTriggerId",
+		"div#merchant-info a",
+		"div#tabular-buybox-container a",
+		"#merchant-info a",
+		"a[href*='seller=']",
+		"span.tabular-buybox-text a",
+		"div.tabular-buybox-container a",
+		"#vse-seller-link",
+	}
 
-	url, exist := res.Attr("href")
-	if !exist {
+	var foundLink bool
+	for _, selector := range selectors {
+		doc.Find(selector).Each(func(i int, s *goquery.Selection) {
+			if foundLink {
+				return
+			}
+			href, exist := s.Attr("href")
+			if exist && strings.Contains(href, "seller=") {
+				sellerLink = s
+				product.url = href
+				foundLink = true
+			}
+		})
+		if foundLink {
+			break
+		}
+	}
+
+	// 兜底方案：遍历所有 a 标签寻找包含 seller= 的链接
+	if !foundLink {
+		doc.Find("a").Each(func(i int, s *goquery.Selection) {
+			if foundLink {
+				return
+			}
+			href, exist := s.Attr("href")
+			if exist && strings.Contains(href, "seller=") {
+				sellerLink = s
+				product.url = href
+				foundLink = true
+			}
+		})
+	}
+
+	if !foundLink {
 		return ERROR_NOT_SELLER_URL
 	}
 
-	product.url = url
-
-	sellerName := strings.TrimSpace(res.Text())
+	sellerName := strings.TrimSpace(sellerLink.Text())
 	if sellerName != "" {
 		product.seller_name = sellerName
 		log.Infof("提取到卖家名称:%s", product.seller_name)
 	}
 
-	bylineInfo := doc.Find("a[id=bylineInfo]").First()
-	if bylineInfo.Length() > 0 {
-		brandText := strings.TrimSpace(bylineInfo.Text())
-		if strings.Contains(brandText, "Brand:") {
-			product.brand_name = strings.TrimSpace(strings.ReplaceAll(brandText, "Brand:", ""))
-		} else if strings.Contains(brandText, "Visit the") && strings.Contains(brandText, "Store") {
-			storeUrl, exists := bylineInfo.Attr("href")
-			if exists {
-				product.brand_store_url = storeUrl
-				log.Infof("提取到旗舰店链接:%s", product.brand_store_url)
-			}
-			parts := strings.Split(brandText, "Visit the")
-			if len(parts) > 1 {
-				brandPart := strings.Split(parts[1], "Store")
-				if len(brandPart) > 0 {
-					product.brand_name = strings.TrimSpace(brandPart[0])
+	// 提取品牌名 - 尝试多个选择器
+	brandSelectors := []string{
+		"a[id=bylineInfo]",
+		"div#bylineInfo_feature_div a",
+		"a#brand",
+		"div#brandByline_feature_div a",
+		"a.a-link-normal.bylineInfo",
+		"#bylineInfo",
+		"#brandByline_feature_div",
+		"a.contributorNameID",
+		"[data-brand]",
+	}
+
+	for _, selector := range brandSelectors {
+		bylineInfo := doc.Find(selector).First()
+		if bylineInfo.Length() > 0 {
+			brandText := strings.TrimSpace(bylineInfo.Text())
+			if brandText != "" {
+				if strings.Contains(brandText, "Brand:") {
+					product.brand_name = strings.TrimSpace(strings.ReplaceAll(brandText, "Brand:", ""))
+				} else if strings.Contains(brandText, "Visit the") && strings.Contains(brandText, "Store") {
+					storeUrl, exists := bylineInfo.Attr("href")
+					if exists {
+						product.brand_store_url = storeUrl
+						log.Infof("提取到旗舰店链接:%s", product.brand_store_url)
+					}
+					parts := strings.Split(brandText, "Visit the")
+					if len(parts) > 1 {
+						brandPart := strings.Split(parts[1], "Store")
+						if len(brandPart) > 0 {
+							product.brand_name = strings.TrimSpace(brandPart[0])
+						}
+					}
+				} else {
+					product.brand_name = brandText
+				}
+				if product.brand_name != "" {
+					product.brand_name = strings.ToLower(product.brand_name)
+					log.Infof("提取到品牌名称:%s", product.brand_name)
+					break
 				}
 			}
-		} else {
-			product.brand_name = brandText
 		}
-		product.brand_name = strings.ToLower(product.brand_name)
-		log.Infof("提取到品牌名称:%s", product.brand_name)
 	}
 
 	return nil
@@ -239,9 +303,33 @@ func (product *productStruct) request(url string) error {
 
 // get_seller_id 从 URL 中提取 seller ID
 func (product *productStruct) get_seller_id() string {
+	if product.url == "" {
+		return ""
+	}
+
+	// 尝试解析为 URL
+	u, err := url.Parse(product.url)
+	if err == nil {
+		if sellerID := u.Query().Get("seller"); sellerID != "" {
+			return sellerID
+		}
+	}
+
+	// 备选方案：处理不完整的 URL 或直接包含参数的情况
 	for _, j := range strings.Split(product.url, "&") {
 		if strings.HasPrefix(j, "seller=") {
 			return strings.Split(j, "seller=")[1]
+		}
+		// 处理 ?seller= 情况
+		if strings.Contains(j, "?seller=") {
+			parts := strings.Split(j, "?seller=")
+			if len(parts) > 1 {
+				sellerPart := parts[1]
+				if idx := strings.Index(sellerPart, "&"); idx > 0 {
+					sellerPart = sellerPart[:idx]
+				}
+				return sellerPart
+			}
 		}
 	}
 	return ""

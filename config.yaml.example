@@ -1,0 +1,80 @@
+basic:
+  # 定义: 相同主机下的app标识
+  # 说明: 由于本程序将爬虫分为三个步骤，即1. 搜索商品，2.搜索商品中的商家链接 3. 搜索商家页面中找到商家信息，
+  #       因此app_id用于相同主机下不同步骤的的程序分工，即在相同主机下多开爬虫客户端
+  # 用途: 下次运行时，以保证能够继续作业以及保证能够不会和其他程序处理的数据相冲突
+  # 注意: 此ID的修改是针对程序而言的,但程序运行期间同时也会将app_id记录到数据库
+  #      另外,建议此ID为全局的标识，例如：A主机启动1、2、3的app_id,那么B主机再启动时，应从4开始
+  app_id: 1
+
+  # 定义: 不同主机之间的标识
+  # 用途: 相同的主机下的爬虫客户端将使用相同的cookie
+  # 注意: 此ID的修改针对数据库，因此需要对应到数据库的cookie表
+  # 插入语句: INSERT INTO `cookie` (`host_id`,`cookie`) VALUES (你的host_id,'xxx=xxx');
+  # 修改语句: update cookie set cookie='xxx=xxx' where host_id=你的host_id；
+  host_id: 1
+
+  # 测试模式，将不连接数据库
+  test: false
+
+  # 填写亚马逊的域名,格式如 www.amazon.co.uk, www.amazon.com
+  domain: "www.amazon.com"
+  
+proxy:
+  # 设置是否启动代理
+  enable: false
+  socks5:
+    # 每次请求时随机使用其中一个
+    # 启动socks代理，可以尝试安装gost
+    # gost -L :8080 或 gost -L -L 127.0.0.1:8080
+    - 127.0.0.1:8080
+
+exec:
+  # 循环次数
+  # 0 无数次
+  # 举例: 执行一次商品搜索后，执行一次商品页搜索，执行一次商家信息搜索，并退出，均设置为1
+  loop:
+    # 总体循环次数
+    all: 0
+    # 执行搜索的次数
+    search: 0
+    # 执行搜索商品页的商家链接的次数
+    product: 0
+    # 执行搜索商家信息的次数
+    seller: 0
+    
+  # enable中，当值为false时，将跳过此步骤
+  enable:
+    # 搜索步骤，从数据库中获取关键词并进行搜索每一页，
+    # 将搜索到的商品记录链接到数据库
+    search: true
+
+    # 根据商品记录链接得到商家链接和商家ID
+    product: true
+
+    # 访问商家页面，获取商家信息
+    seller: true
+
+  # 1 优先级优先(默认)
+  # 2 搜索次数少优先
+  search_priority: 1
+
+
+mysql:
+  ip: "127.0.0.1"
+  port: "3306"
+  username:
+  password:
+  database: "taotie"
+
+# 品牌巡查配置
+# 启动方式: ./amazon-crawler -c config.yaml -brand
+brand:
+  # 是否启用品牌巡查
+  enable: true
+  # 每个品牌最多搜索的ASIN数量
+  max_asins: 5
+  # 每批处理的品牌数量
+  batch: 100
+  # 循环次数（0=无限）
+  loop: 0

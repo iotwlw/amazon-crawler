@@ -361,7 +361,7 @@ func (seller *sellerStruct) update() error {
 
 func (seller *sellerStruct) syncToAmazonShop() error {
 	if seller.keyword == "" {
-		log.Warn("keyword 为空，跳过同步到 amazon_shop 表")
+		log.Warn("keyword 为空，跳过同步到 tb_amazon_shop 表")
 		return nil
 	}
 
@@ -395,12 +395,12 @@ func (seller *sellerStruct) syncToAmazonShop() error {
 			0,
 			nil)
 		if err != nil {
-			log.Errorf("同步到 amazon_shop 表失败: %v", err)
+			log.Errorf("同步到 tb_amazon_shop 表失败: %v", err)
 			return err
 		}
-		log.Infof("成功同步到 amazon_shop 表: domain=%s, shop_id=%s", seller.keyword, seller.seller_id)
+		log.Infof("成功同步到 tb_amazon_shop 表: domain=%s, shop_id=%s", seller.keyword, seller.seller_id)
 	} else if err != nil {
-		log.Errorf("查询 amazon_shop 表失败: %v", err)
+		log.Errorf("查询 tb_amazon_shop 表失败: %v", err)
 		return err
 	} else {
 		updateSQL := `UPDATE tb_amazon_shop SET 

@@ -25,6 +25,7 @@ type appConfig struct {
 	Basic      `yaml:"basic"`
 	Proxy      `yaml:"proxy"`
 	Exec       `yaml:"exec"`
+	Brand      BrandConfig `yaml:"brand"` // 品牌巡查配置
 	db         *sql.DB
 	cookie     string
 	cookieID   int64 // 当前使用的 cookie 记录 ID
@@ -73,6 +74,7 @@ type flagStruct struct {
 	serve       string // HTTP 服务模式，值为监听地址如 ":8080"
 	asin        string // ASIN 列表，逗号分隔
 	domain      string // 指定亚马逊域名（仅 ASIN 模式有效）
+	brand       bool   // 品牌巡查模式
 }
 
 var app appConfig
@@ -139,14 +141,39 @@ func init_mysql() {
 func init_network() {
 	log.Info("网络测试开始")
 
-	var s searchStruct
-	s.en_key = "Hardware+electrician"
-	_, err := s.request(0)
-	if err != nil {
-		log.Error("网络错误")
+	maxRetries := 3 // 最大重试次数
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			log.Infof("网络测试重试 %d/%d", attempt, maxRetries)
+		}
+
+		var s searchStruct
+		s.en_key = "Hardware+electrician"
+		_, err := s.request(0)
+		if err == nil {
+			log.Info("网络测试通过")
+			return
+		}
+
+		// 检查是否是验证失败错误
+		if err == ERROR_VERIFICATION {
+			log.Warnf("检测到 Cookie 需要验证，尝试获取新的 Cookie (尝试 %d/%d)", attempt, maxRetries)
+			if handleErr := app.handleCookieInvalid(); handleErr != nil {
+				log.Errorf("获取新 Cookie 失败: %v", handleErr)
+				log.Error("网络错误")
+				panic(err)
+			}
+			// 成功获取新 Cookie，继续下一次尝试
+			continue
+		}
+
+		// 其他错误直接 panic
+		log.Errorf("网络错误: %v", err)
 		panic(err)
 	}
 
+	log.Error("网络测试失败，已达最大重试次数")
+	panic(fmt.Errorf("网络测试失败，请检查网络或获取新的 Cookie"))
 }
 func init_signal() {
 	// 创建一个通道来接收操作系统的信号
@@ -169,8 +196,20 @@ func init_flag() flagStruct {
 	flag.StringVar(&f.serve, "serve", "", "启动 HTTP 服务模式，指定监听地址如 :8080")
 	flag.StringVar(&f.asin, "asin", "", "ASIN 列表，逗号分隔（如：B08N5WRWNW,B07XYZ）")
 	flag.StringVar(&f.domain, "domain", "www.amazon.com.mx", "亚马逊域名（仅 ASIN 模式有效）")
+	flag.BoolVar(&f.brand, "brand", false, "启动品牌巡查模式")
 	flag.Parse()
 	return f
+}
+
+// normalizeString 规范化字符串用于比较（转小写并移除空格和特殊字符）
+func normalizeString(s string) string {
+	s = strings.ToLower(s)
+	s = strings.ReplaceAll(s, " ", "")
+	s = strings.ReplaceAll(s, "-", "")
+	s = strings.ReplaceAll(s, "&", "")
+	s = strings.ReplaceAll(s, ",", "")
+	s = strings.ReplaceAll(s, ".", "")
+	return s
 }
 
 func main() {
@@ -182,7 +221,11 @@ func main() {
 	init_signal()
 
 	// 判断运行模式
-	if f.asin != "" {
+	if f.brand {
+		// 品牌巡查模式
+		brandMain()
+		return
+	} else if f.asin != "" {
 		// ASIN 评论爬虫模式
 		log.Infof("启动 ASIN 评论爬虫模式")
 		scraper := NewASINScraper(f.asin, f.domain)
