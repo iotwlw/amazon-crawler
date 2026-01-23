@@ -1,9 +1,9 @@
 {
-  "version": "1.0.0",
-  "lastUpdated": "2025-12-28T00:00:00Z",
+  "version": "1.3.0",
+  "lastUpdated": "2026-01-23T21:28:20+08:00",
   "project": {
     "name": "amazon-crawler",
-    "description": "分布式亚马逊商品信息爬虫工具",
+    "description": "分布式亚马逊商品信息爬虫工具，支持多种运行模式",
     "language": "Go",
     "version": "1.4.0"
   },
@@ -13,19 +13,42 @@
       {
         "path": "/",
         "name": "core",
-        "description": "核心爬虫逻辑模块",
+        "description": "核心爬虫逻辑模块，包含多种运行模式",
         "language": "Go",
         "entryPoints": ["main.go"],
         "keyFiles": [
           "main.go",
+          "crawler.go",
           "search.go",
           "product.go",
           "seller.go",
+          "api.go",
+          "task.go",
+          "brand.go",
+          "asin_scraper.go",
           "network.go",
           "robot.go",
           "error.go",
-          "time.go"
-        ]
+          "time.go",
+          "cookie_loader.go"
+        ],
+        "interfaces": [
+          {
+            "type": "HTTP API",
+            "file": "api.go",
+            "endpoints": [
+              "POST /api/crawl",
+              "GET /api/status",
+              "GET /health"
+            ]
+          },
+          {
+            "type": "CLI",
+            "file": "main.go",
+            "flags": ["-c", "-serve", "-asin", "-domain", "-brand"]
+          }
+        ],
+        "tests": []
       },
       {
         "path": "/sql",
@@ -34,13 +57,42 @@
         "language": "SQL",
         "keyFiles": [
           "ddl.sql",
-          "category.sql"
+          "category.sql",
+          "alter_category.sql",
+          "alter_brand_domains.sql"
         ]
       }
     ]
   },
+  "runModes": [
+    {
+      "name": "命令行模式",
+      "description": "传统三阶段爬取流程",
+      "command": "./amazon-crawler -c config.yaml",
+      "entryFile": "main.go"
+    },
+    {
+      "name": "HTTP API 服务模式",
+      "description": "RESTful API 接口，异步任务提交",
+      "command": "./amazon-crawler -c config.yaml -serve :8080",
+      "entryFile": "api.go"
+    },
+    {
+      "name": "ASIN 评论爬虫模式",
+      "description": "批量获取 ASIN 评分和评论数",
+      "command": "./amazon-crawler -c config.yaml -asin \"B08N5WRWNW\" -domain \"www.amazon.com.mx\"",
+      "entryFile": "asin_scraper.go"
+    },
+    {
+      "name": "品牌巡查模式",
+      "description": "批量巡查品牌列表，获取卖家信息",
+      "command": "./amazon-crawler -c config.yaml -brand",
+      "entryFile": "brand.go"
+    }
+  ],
   "dependencies": {
     "go": {
+      "version": "1.19",
       "modules": [
         "github.com/PuerkitoBio/goquery v1.8.1",
         "github.com/go-sql-driver/mysql v1.7.1",
@@ -51,27 +103,65 @@
     }
   },
   "coverage": {
-    "totalFiles": 25,
-    "scannedFiles": 24,
-    "coveragePercent": 96,
-    "ignoredFiles": [
+    "totalFiles": 22,
+    "scannedFiles": 22,
+    "coveragePercent": 100,
+    "ignoredPatterns": [
       ".git/**",
       ".DS_Store",
-      "*.yaml"
+      "*.exe",
+      "*.log",
+      "dist/**",
+      "output/**",
+      "cookies.json",
+      ".spec-workflow/**"
     ],
-    "gaps": []
+    "gaps": [],
+    "fileBreakdown": {
+      "go": 14,
+      "sql": 4,
+      "yaml": 2,
+      "md": 2
+    }
   },
   "database": {
     "type": "MySQL",
     "version": "5.7+ / 8.x+",
-    "databaseName": "amazon",
+    "databaseName": "taotie",
+    "tablePrefix": "amc_",
     "tables": [
-      "application",
-      "category",
-      "cookie",
-      "product",
-      "search_statistics",
-      "seller"
+      {
+        "name": "amc_application",
+        "description": "应用状态表"
+      },
+      {
+        "name": "amc_category",
+        "description": "搜索关键词/品牌表"
+      },
+      {
+        "name": "amc_cookie",
+        "description": "Cookie Session表"
+      },
+      {
+        "name": "amc_product",
+        "description": "商品表"
+      },
+      {
+        "name": "amc_search_statistics",
+        "description": "搜索统计表"
+      },
+      {
+        "name": "amc_seller",
+        "description": "卖家表"
+      },
+      {
+        "name": "tb_amazon_shop",
+        "description": "亚马逊店铺表（外部同步）"
+      },
+      {
+        "name": "available_brand_domains",
+        "description": "品牌巡查表（品牌模式使用）"
+      }
     ],
     "views": [
       "产品检查表",
@@ -85,39 +175,51 @@
   },
   "configuration": {
     "file": "config.yaml",
-    "template": "config.yaml.save",
+    "template": "config.yaml.example",
     "keySettings": {
       "mysql": "数据库连接配置",
-      "basic": "基础配置(app_id, host_id, domain)",
-      "proxy": "代理配置(可选)",
-      "exec": "执行配置(启用功能、循环次数)"
+      "basic": "基础配置(app_id, host_id, domain, test)",
+      "proxy": "代理配置(可选，支持SOCKS5)",
+      "exec": "执行配置(启用功能、循环次数、搜索优先级)",
+      "brand": "品牌巡查配置(enable, max_asins, batch, loop)"
     }
   },
   "architecture": {
-    "pattern": "three-stage-pipeline",
+    "pattern": "multi-mode-pipeline",
     "stages": [
       {
         "name": "search",
         "file": "search.go",
         "description": "搜索商品并提取链接",
-        "input": "category 表",
-        "output": "product 表"
+        "input": "amc_category 表",
+        "output": "amc_product 表"
       },
       {
         "name": "product",
         "file": "product.go",
         "description": "从商品页提取卖家ID",
-        "input": "product 表",
-        "output": "seller 表"
+        "input": "amc_product 表",
+        "output": "amc_seller 表"
       },
       {
         "name": "seller",
         "file": "seller.go",
         "description": "获取卖家详细信息",
-        "input": "seller 表",
-        "output": "seller 表(更新)"
+        "input": "amc_seller 表",
+        "output": "amc_seller 表(更新), tb_amazon_shop 表"
       }
-    ]
+    ],
+    "memoryOptimizedFlow": {
+      "file": "crawler.go",
+      "description": "HTTP 模式内存优化流程",
+      "functions": [
+        "ExecuteCrawlWithStatus",
+        "crawlSearchInMemory",
+        "crawlProductsFromMemory",
+        "fetchSellerDetails",
+        "batchSaveAll"
+      ]
+    }
   },
   "distributed": {
     "enabled": true,
@@ -129,6 +231,25 @@
     "enabled": true,
     "file": "robot.go",
     "compliance": "所有请求都经过 robots.txt 检查"
+  },
+  "cookieManagement": {
+    "file": "cookie_loader.go",
+    "features": [
+      "动态分配",
+      "失效自动标记",
+      "自动切换",
+      "统计查询"
+    ],
+    "table": "amc_cookie"
+  },
+  "errorHandling": {
+    "file": "error.go",
+    "customErrors": [
+      "ERROR_NOT_SELLER_URL",
+      "ERROR_NOT_503",
+      "ERROR_NOT_404",
+      "ERROR_VERIFICATION"
+    ]
   },
   "build": {
     "tool": "goreleaser",
