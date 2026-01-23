@@ -3,8 +3,10 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	_ "github.com/go-sql-driver/mysql"
@@ -148,34 +150,21 @@ func (seller *sellerStruct) request() error {
 
 	log.Infof("请求链接 %s", seller.url)
 
+	// 添加随机延迟 2-5 秒（防止请求过快）
+	delay := 2 + rand.Intn(3)
+	time.Sleep(time.Duration(delay) * time.Second)
+
 	client := get_client()
 	req, err := http.NewRequest("GET", seller.url, nil)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authority", app.Domain)
-	req.Header.Set("Accept", `text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7`)
-	req.Header.Set("Accept-Language", `zh-CN,zh;q=0.9`)
-	req.Header.Set("cache-control", `max-age=0`)
-	req.Header.Set("device-memory", `8`)
-	req.Header.Set("downlink", `1.5'`)
-	req.Header.Set("dpr", `2`)
-	req.Header.Set("ect", `3g`)
-	req.Header.Set("rtt", `350`)
-	if _, err := app.get_cookie(); err != nil {
-		log.Error(err)
-	} else {
-		req.Header.Set("Cookie", app.cookie)
-	}
-	req.Header.Set("upgrade-insecure-requests", `1`)
+
+	// 使用统一的请求头设置
+	app.setCommonHeaders(req)
+
+	// 设置卖家页面特定的 Referer
 	req.Header.Set("Referer", fmt.Sprintf("https://%s/?k=Hardware+electricia%%27n&crid=3CR8DCX0B3L5U&sprefix=hardware+electricia%%27n%%2Caps%%2C714&ref=nb_sb_noss", app.Domain))
-	req.Header.Set("Sec-Fetch-Dest", `empty`)
-	req.Header.Set("Sec-Fetch-Mode", `cors`)
-	req.Header.Set("Sec-Fetch-Site", `same-origin`)
-	req.Header.Set("User-Agent", userAgent)
-	req.Header.Set("sec-ch-ua", `"Not.A/Brand";v="8", "Chromium";v="114", "Google Chrome";v="114"`)
-	req.Header.Set("sec-ch-ua-mobile", `?0`)
-	req.Header.Set("sec-ch-ua-platform", `"macOS"`)
 
 	resp, err := client.Do(req)
 	if err != nil {

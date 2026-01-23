@@ -17,14 +17,14 @@
 [下载](https://github.com/tengfei-xy/amazon-crawler/releases)
 
 ## 数据库
-
+因为数据变更，不自动执行
 > 仅支持mysql
 
 导入[SQL文件](https://github.com/tengfei-xy/amazon-crawler/blob/main/sql/ddl.sql)并初始化数据库参考命令：
 
 ```bash
 # 执行后，将丢弃原表的数据
-bin/mysql -u root -p < ddl.sql
+# bin/mysql -u root -p < ddl.sql
 ```
 
 由于工具需要关键词来进行搜索，所以需要初始化一些关键词，参考[关键词数据库文件]((https://github.com/tengfei-xy/amazon-crawler/blob/main/sql/category.sql))
@@ -33,7 +33,7 @@ bin/mysql -u root -p < ddl.sql
 
 ```bash
 # 此语句应建表后立即使用
-bin/mysql -D amazon -u root -p < category.sql
+# bin/mysql -D amazon -u root -p < category.sql
 # 若只添加测试使用单条命令，使用下列语句,并设置最低的优先级为0
 # insert into `category` (`zh_key`,`en_key`,priority) VALUES ('音响','speakers',0);
 ```

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/signal"
 	"strings"
@@ -21,15 +22,17 @@ const MYSQL_APPLICATION_STATUS_PRODUCT int = 3
 const MYSQL_APPLICATION_STATUS_SELLER int = 4
 
 type appConfig struct {
-	Mysql      `yaml:"mysql"`
-	Basic      `yaml:"basic"`
-	Proxy      `yaml:"proxy"`
-	Exec       `yaml:"exec"`
-	Brand      BrandConfig `yaml:"brand"` // 品牌巡查配置
-	db         *sql.DB
-	cookie     string
-	cookieID   int64 // 当前使用的 cookie 记录 ID
-	primary_id int64
+	Mysql          `yaml:"mysql"`
+	Basic          `yaml:"basic"`
+	Proxy          `yaml:"proxy"`
+	Exec           `yaml:"exec"`
+	Brand          BrandConfig `yaml:"brand"` // 品牌巡查配置
+	db             *sql.DB
+	cookie         string
+	cookieID       int64           // 当前使用的 cookie 记录 ID
+	browserProfile *BrowserProfile // 绑定的浏览器指纹
+	proxyAddr      string          // 绑定的代理 IP
+	primary_id     int64
 }
 type Exec struct {
 	Enable          `yaml:"enable"`
@@ -264,15 +267,18 @@ func main() {
 func (app *appConfig) get_cookie() (string, error) {
 	var cookie string
 	var cookieID int64
+	var browserProfileID sql.NullString
+	var proxyAddr sql.NullString
+
 	if app.Basic.Host_id == 0 {
 		return "", fmt.Errorf("配置文件中host_id为0，cookie将为空")
 	}
 
-	// 查询当前 host_id 绑定的正常状态的 cookie
+	// 查询当前 host_id 绑定的正常状态的 cookie（包含浏览器指纹和代理信息）
 	err := app.db.QueryRow(
-		"SELECT id, cookie FROM amc_cookie WHERE host_id = ? AND status = 1 LIMIT 1",
+		"SELECT id, cookie, browser_profile, proxy_addr FROM amc_cookie WHERE host_id = ? AND status = 1 LIMIT 1",
 		app.Basic.Host_id,
-	).Scan(&cookieID, &cookie)
+	).Scan(&cookieID, &cookie, &browserProfileID, &proxyAddr)
 
 	if err == sql.ErrNoRows {
 		// 当前 host_id 没有可用的 cookie，尝试从未分配的 cookie 中获取一个
@@ -283,12 +289,40 @@ func (app *appConfig) get_cookie() (string, error) {
 	}
 
 	cookie = strings.TrimSpace(cookie)
+
+	// 恢复绑定的浏览器指纹
+	if browserProfileID.Valid && browserProfileID.String != "" {
+		app.browserProfile = getBrowserProfileByID(browserProfileID.String)
+	} else {
+		// 如果数据库中没有保存浏览器指纹，随机选择一个并更新数据库
+		app.browserProfile = getRandomBrowserProfile()
+		_, _ = app.db.Exec(
+			"UPDATE amc_cookie SET browser_profile = ? WHERE id = ?",
+			app.browserProfile.ID, cookieID,
+		)
+	}
+
+	// 恢复绑定的代理地址
+	if proxyAddr.Valid && proxyAddr.String != "" {
+		app.proxyAddr = proxyAddr.String
+	} else {
+		// 如果数据库中没有保存代理地址，从配置中随机选择一个并更新数据库
+		if app.Proxy.Enable && len(app.Proxy.Sockc5) > 0 {
+			app.proxyAddr = app.Proxy.Sockc5[rand.Intn(len(app.Proxy.Sockc5))]
+			_, _ = app.db.Exec(
+				"UPDATE amc_cookie SET proxy_addr = ? WHERE id = ?",
+				app.proxyAddr, cookieID,
+			)
+		}
+	}
+
 	if app.cookie != cookie {
 		previewLen := 50
 		if len(cookie) < previewLen {
 			previewLen = len(cookie)
 		}
-		log.Infof("使用 cookie (id=%d): %s...", cookieID, cookie[:previewLen])
+		log.Infof("使用 cookie (id=%d, profile=%s, proxy=%s): %s...",
+			cookieID, app.browserProfile.ID, app.proxyAddr, cookie[:previewLen])
 	}
 
 	app.cookie = cookie
@@ -318,10 +352,18 @@ func (app *appConfig) acquireNewCookie() (string, error) {
 		return "", fmt.Errorf("查询未分配 cookie 失败: %w", err)
 	}
 
-	// 将 cookie 绑定到当前 host_id
+	// 随机选择一个浏览器指纹
+	app.browserProfile = getRandomBrowserProfile()
+
+	// 从配置中随机选择一个代理地址
+	if app.Proxy.Enable && len(app.Proxy.Sockc5) > 0 {
+		app.proxyAddr = app.Proxy.Sockc5[rand.Intn(len(app.Proxy.Sockc5))]
+	}
+
+	// 将 cookie 绑定到当前 host_id，并保存浏览器指纹和代理地址
 	_, err = tx.Exec(
-		"UPDATE amc_cookie SET host_id = ? WHERE id = ?",
-		app.Basic.Host_id, cookieID,
+		"UPDATE amc_cookie SET host_id = ?, browser_profile = ?, proxy_addr = ? WHERE id = ?",
+		app.Basic.Host_id, app.browserProfile.ID, app.proxyAddr, cookieID,
 	)
 	if err != nil {
 		return "", fmt.Errorf("绑定 cookie 失败: %w", err)
@@ -332,7 +374,8 @@ func (app *appConfig) acquireNewCookie() (string, error) {
 	}
 
 	cookie = strings.TrimSpace(cookie)
-	log.Infof("获取新 cookie (id=%d) 并绑定到 host_id=%d", cookieID, app.Basic.Host_id)
+	log.Infof("获取新 cookie (id=%d, profile=%s, proxy=%s) 并绑定到 host_id=%d",
+		cookieID, app.browserProfile.ID, app.proxyAddr, app.Basic.Host_id)
 
 	app.cookie = cookie
 	app.cookieID = cookieID
