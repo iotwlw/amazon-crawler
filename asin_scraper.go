@@ -84,7 +84,8 @@ func (s *ASINScraper) scrapeASIN(asin string) ASINResult {
 	url := fmt.Sprintf("https://%s/dp/%s", s.domain, asin)
 
 	// 检查 robots.txt
-	if err := robot.IsAllow(userAgent, url); err != nil {
+	fp := GetCurrentFingerprint()
+	if err := robot.IsAllow(fp.UserAgent, url); err != nil {
 		log.Errorf("robots.txt 不允许访问: %v", err)
 		result.Status = "error"
 		result.ErrorMessage = err.Error()
@@ -271,15 +272,8 @@ func (s *ASINScraper) extractReviewCount(doc *goquery.Document) int {
 
 // setRequestHeaders 设置请求头
 func (s *ASINScraper) setRequestHeaders(req *http.Request) {
-	req.Header.Set("Authority", s.domain)
-	req.Header.Set("Accept", `text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8`)
-	req.Header.Set("Accept-Language", `es-MX,es;q=0.9,en;q=0.8`)
-	req.Header.Set("Cache-Control", `max-age=0`)
-	req.Header.Set("Upgrade-Insecure-Requests", `1`)
-	req.Header.Set("User-Agent", userAgent)
-	req.Header.Set("Sec-Fetch-Dest", `empty`)
-	req.Header.Set("Sec-Fetch-Mode", `cors`)
-	req.Header.Set("Sec-Fetch-Site", `same-origin`)
+	// 使用统一的指纹系统
+	ApplyFingerprint(req, GetRandomReferer(s.domain))
 }
 
 // exportCSV 导出 CSV 文件

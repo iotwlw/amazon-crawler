@@ -284,7 +284,8 @@ func (b *brandStruct) processWithSearch(maxASINs int) error {
 func (b *brandStruct) search(maxASINs int) error {
 	searchURL := fmt.Sprintf("https://%s/s?k=%s", app.Domain, url.QueryEscape(b.brandName))
 
-	if err := robot.IsAllow(userAgent, searchURL); err != nil {
+	fp := GetCurrentFingerprint()
+	if err := robot.IsAllow(fp.UserAgent, searchURL); err != nil {
 		return fmt.Errorf("robots.txt 不允许: %v", err)
 	}
 
@@ -330,7 +331,8 @@ func (b *brandStruct) saveASINsToProduct() {
 func (b *brandStruct) fetchProductPage(asin string) error {
 	productURL := fmt.Sprintf("https://%s/dp/%s", app.Domain, asin)
 
-	if err := robot.IsAllow(userAgent, productURL); err != nil {
+	fp := GetCurrentFingerprint()
+	if err := robot.IsAllow(fp.UserAgent, productURL); err != nil {
 		return fmt.Errorf("robots.txt 不允许: %v", err)
 	}
 
@@ -429,7 +431,8 @@ func extractSellerID(href string) string {
 func (b *brandStruct) fetchSellerInfo() error {
 	sellerURL := fmt.Sprintf("https://%s/sp?ie=UTF8&seller=%s", app.Domain, b.sellerID)
 
-	if err := robot.IsAllow(userAgent, sellerURL); err != nil {
+	fp := GetCurrentFingerprint()
+	if err := robot.IsAllow(fp.UserAgent, sellerURL); err != nil {
 		return fmt.Errorf("robots.txt 不允许: %v", err)
 	}
 
@@ -578,11 +581,8 @@ func (b *brandStruct) request(reqURL string) (*goquery.Document, error) {
 		return nil, err
 	}
 
-	req.Header.Set("Authority", app.Domain)
-	req.Header.Set("Accept", `text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7`)
-	req.Header.Set("Accept-Language", `zh-CN,zh;q=0.9`)
-	req.Header.Set("cache-control", `max-age=0`)
-	req.Header.Set("User-Agent", userAgent)
+	// 使用统一的指纹系统
+	ApplyFingerprint(req, GetRandomReferer(app.Domain))
 
 	if _, err := app.get_cookie(); err != nil {
 		log.Warnf("获取 cookie 失败: %v", err)

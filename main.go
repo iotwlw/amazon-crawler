@@ -116,9 +116,10 @@ func init_config(flag flagStruct) {
 }
 func init_rebots() {
 	robotTxt := fmt.Sprintf("https://%s/robots.txt", app.Domain)
+	fp := GetCurrentFingerprint()
 
 	log.Infof("加载文件: %s", robotTxt)
-	txt, err := request_get(robotTxt, userAgent)
+	txt, err := request_get(robotTxt, fp.UserAgent)
 	if err != nil {
 		log.Error("网络错误")
 		panic(err)
@@ -365,6 +366,10 @@ func (app *appConfig) handleCookieInvalid() error {
 	if err := app.markCookieInvalid(); err != nil {
 		log.Errorf("标记 cookie 失效出错: %v", err)
 	}
+
+	// 轮换浏览器指纹
+	RotateFingerprint()
+	log.Info("已轮换浏览器指纹")
 
 	// 尝试获取新的 cookie
 	_, err := app.acquireNewCookie()

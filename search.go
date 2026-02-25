@@ -75,8 +75,12 @@ func (s *searchStruct) main() error {
 				s.start--
 				log.Warn("遇到503错误，尝试获取新的Cookie")
 				if handleErr := app.handleCookieInvalid(); handleErr != nil {
-					log.Errorf("获取新Cookie失败: %v，等待120秒后重试", handleErr)
-					sleep(120)
+					log.Errorf("获取新Cookie失败: %v，等待后重试", handleErr)
+					SmartDelay("503")
+				} else {
+					// Cookie 切换成功，同时轮换指纹
+					RotateFingerprint()
+					SmartDelay("503")
 				}
 				continue
 
@@ -135,7 +139,8 @@ func (s *searchStruct) set_en_key() string {
 func (s *searchStruct) request(seq int) (*goquery.Document, error) {
 	url := fmt.Sprintf("https://%s/s?k=%s&page=%d&dc&crid=2V9436DZJ6IJF&qid=1699839233&sprefix=clothe%%2Caps%%2C552&ref=sr_pg_2", app.Domain, s.en_key, seq)
 	// 链接增加 &dc 表示直接搜索，避免转移到其他关键词
-	err := robot.IsAllow(userAgent, url)
+	fp := GetCurrentFingerprint()
+	err := robot.IsAllow(fp.UserAgent, url)
 	if err != nil {
 		return nil, err
 	}
@@ -146,28 +151,17 @@ func (s *searchStruct) request(seq int) (*goquery.Document, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", `text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7`)
-	req.Header.Set("Accept-Language", `zh-CN,zh;q=0.9`)
-	req.Header.Set("cache-control", `max-age=0`)
-	req.Header.Set("device-memory", `8`)
-	req.Header.Set("device-memory", `8`)
-	req.Header.Set("downlink", `1.55'`)
-	req.Header.Set("dpr", `2`)
-	req.Header.Set("ect", `3g`)
-	req.Header.Set("pragma", `400`)
+
+	// 使用统一的指纹系统
+	referer := GetRandomReferer(app.Domain)
+	ApplyFingerprint(req, referer)
+
+	// 设置 Cookie
 	if _, err := app.get_cookie(); err != nil {
 		log.Error(err)
 	} else {
 		req.Header.Set("Cookie", app.cookie)
 	}
-	req.Header.Set("upgrade-insecure-requests", `1`)
-	req.Header.Set("Sec-Fetch-Dest", `empty`)
-	req.Header.Set("Sec-Fetch-Mode", `cors`)
-	req.Header.Set("Sec-Fetch-Site", `same-origin`)
-	req.Header.Set("User-Agent", userAgent)
-	req.Header.Set("sec-ch-ua", `"Not.A/Brand";v="8", "Chromium";v="114", "Google Chrome";v="114"`)
-	req.Header.Set("sec-ch-ua-mobile", `?0`)
-	req.Header.Set("sec-ch-ua-platform", `"macOS"`)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -215,11 +209,15 @@ func (s *searchStruct) get_product_url(doc *goquery.Document) {
 		}
 	}()
 
-	res := doc.Find("div[class~=s-search-results]").First()
+	res := doc.Find("div.s-search-results").First()
 
 	if res.Length() == 0 {
-		log.Errorf("错误的页面结构 关键词:%s", s.zh_key)
-		return
+		// 备选选择器
+		res = doc.Find(".s-main-slot").First()
+		if res.Length() == 0 {
+			log.Errorf("错误的页面结构 关键词:%s", s.zh_key)
+			return
+		}
 	}
 	// len res.Find("div[data-index]")
 	data_index := res.Find("div[data-index]")

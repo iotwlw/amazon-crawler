@@ -73,12 +73,17 @@ func (product *productStruct) main() error {
 			continue
 		}
 		url = "https://" + app.Domain + url + param
-		if err := robot.IsAllow(userAgent, url); err != nil {
+		fp := GetCurrentFingerprint()
+		if err := robot.IsAllow(fp.UserAgent, url); err != nil {
 			log.Errorf("%v", err)
 			continue
 		}
 
 		log.Infof("查找商品链接 ID:%d url:%s", primary_id, url)
+
+		// 添加请求间隔
+		SmartDelay("normal")
+
 		err := product.request(url)
 		if err != nil {
 			if err == ERROR_NOT_SELLER_URL {
@@ -87,7 +92,7 @@ func (product *productStruct) main() error {
 			} else if err == ERROR_NOT_404 || err == ERROR_NOT_503 {
 				product.update_status(primary_id, MYSQL_PRODUCT_STATUS_ERROR_OVER, "", "", "")
 				log.Error(err)
-				sleep(300)
+				SmartDelay("error")
 				continue
 			} else if err == ERROR_VERIFICATION {
 				// Cookie 失效，标记失效并尝试获取新的
@@ -95,13 +100,15 @@ func (product *productStruct) main() error {
 				log.Error(err)
 				if err := app.handleCookieInvalid(); err != nil {
 					log.Errorf("处理 cookie 失效失败: %v", err)
+				} else {
+					RotateFingerprint()
 				}
-				sleep(300)
+				SmartDelay("captcha")
 				continue
 			} else {
 				product.update_status(primary_id, MYSQL_PRODUCT_STATUS_ERROR_OVER, "", "", "")
 				log.Error(err)
-				sleep(300)
+				SmartDelay("error")
 				continue
 
 			}
@@ -149,29 +156,17 @@ func (product *productStruct) request(url string) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authority", app.Domain)
-	req.Header.Set("Accept", `text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7`)
-	req.Header.Set("Accept-Language", `zh-CN,zh;q=0.9`)
-	req.Header.Set("cache-control", `max-age=0`)
-	req.Header.Set("device-memory", `8`)
-	req.Header.Set("downlink", `1.5'`)
-	req.Header.Set("dpr", `2`)
-	req.Header.Set("ect", `3g`)
-	req.Header.Set("rtt", `350`)
+
+	// 使用统一的指纹系统
+	referer := GetRandomReferer(app.Domain)
+	ApplyFingerprint(req, referer)
+
+	// 设置 Cookie
 	if _, err := app.get_cookie(); err != nil {
 		log.Error(err)
 	} else {
 		req.Header.Set("Cookie", app.cookie)
 	}
-	req.Header.Set("upgrade-insecure-requests", `1`)
-	req.Header.Set("Referer", fmt.Sprintf("https://%s/?k=Hardware+electricia%%27n&crid=3CR8DCX0B3L5U&sprefix=hardware+electricia%%27n%%2Caps%%2C714&ref=nb_sb_noss", app.Domain))
-	req.Header.Set("Sec-Fetch-Dest", `empty`)
-	req.Header.Set("Sec-Fetch-Mode", `cors`)
-	req.Header.Set("Sec-Fetch-Site", `same-origin`)
-	req.Header.Set("User-Agent", userAgent)
-	req.Header.Set("sec-ch-ua", `"Not.A/Brand";v="8", "Chromium";v="114", "Google Chrome";v="114"`)
-	req.Header.Set("sec-ch-ua-mobile", `?0`)
-	req.Header.Set("sec-ch-ua-platform", `"macOS"`)
 
 	resp, err := client.Do(req)
 	if err != nil {
