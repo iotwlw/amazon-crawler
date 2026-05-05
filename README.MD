@@ -111,7 +111,7 @@ go run . -c config.yaml
 .\amazon-crawler.exe -c config.yaml
 ```
 
-## 链接巡检 / Ask Rufus 批量抓取
+## 链接巡检
 
 准备一个文本文件，一行一个 Amazon 商品链接或 ASIN：
 
@@ -126,7 +126,7 @@ B0DWWWP4FF
 .\amazon-crawler.exe -c config.yaml -link-file .\asins.txt -domain www.amazon.com -link-output .\output\link_inspection.xlsx
 ```
 
-输出 XLSX 会保留输入顺序，并包含 `Ask Rufus问题` 列。该列会抓取商品页中 Ask Rufus 区域的推荐问题，多条问题用换行分隔。
+输出 XLSX 会保留输入顺序。
 
 ## HTTP 服务模式（API 调用）
 

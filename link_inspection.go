@@ -43,7 +43,7 @@ var (
 		"PromoCode",
 		"Keep",
 		"Choice",
-		"Ask Rufus问题",
+		"价格状态",
 	}
 )
 
@@ -68,6 +68,7 @@ type LinkInspectionResult struct {
 	Product         string
 	ASIN            string
 	Price           string
+	PriceStatus     string
 	Coupon          string
 	IsDeal          string
 	PrimeExclusive  string
@@ -79,7 +80,6 @@ type LinkInspectionResult struct {
 	PromoCode       string
 	Keep            string
 	Choice          string
-	AskRufus        string
 	ErrorMessage    string
 }
 
@@ -268,6 +268,7 @@ func extractLinkInspectionFields(doc *goquery.Document, item LinkInspectionItem)
 		Product:         textBySelectors(doc, []string{"#productTitle"}),
 		ASIN:            asin,
 		Price:           price,
+		PriceStatus:     defaultSpace(extractPriceStatusValue(doc)),
 		Coupon:          defaultSpace(extractCouponValue(doc)),
 		IsDeal:          defaultSpace(textBySelectors(doc, []string{"#dealBadgeSupportingText", "#dealBadge_feature_div"})),
 		PrimeExclusive:  defaultSpace(textBySelectors(doc, []string{"#primeExclusivePricingMessage .a-size-base", "#primeExclusivePricingMessage"})),
@@ -287,8 +288,7 @@ func extractLinkInspectionFields(doc *goquery.Document, item LinkInspectionItem)
 		Keep: textBySelectors(doc, []string{
 			"#NEW_1_nostos_badge",
 		}),
-		Choice:   extractChoiceValue(doc),
-		AskRufus: extractAskRufusValue(doc),
+		Choice: extractChoiceValue(doc),
 	}
 	return result
 }
@@ -470,6 +470,60 @@ func extractListPriceValue(doc *goquery.Document) string {
 	})
 }
 
+func extractPriceStatusValue(doc *goquery.Document) string {
+	selectors := []string{
+		"#rightCol",
+		"#availability",
+		"#availabilityInsideBuyBox_feature_div",
+		"#outOfStock",
+		"#unqualifiedBuyBox_feature_div",
+		"#desktop_buybox",
+		"#buybox",
+		"#buybox_feature_div",
+		"#apex_desktop",
+		"#apex_desktop_buybox",
+		"#qualifiedBuyBox",
+		"#offerDisplayGroup",
+		"[id*=\"BuyBox\"]",
+		"[id*=\"buybox\"]",
+		"[id*=\"offer\"]",
+		"[id*=\"Offer\"]",
+	}
+	for _, selector := range selectors {
+		if value := firstPriceStatusFromSelection(doc.Find(selector)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func firstPriceStatusFromSelection(selection *goquery.Selection) string {
+	var value string
+	selection.EachWithBreak(func(_ int, s *goquery.Selection) bool {
+		value = priceStatusFromText(selectionTextWithoutScripts(s))
+		return value == ""
+	})
+	return value
+}
+
+func priceStatusFromText(text string) string {
+	normalized := strings.ToLower(cleanText(text))
+	switch {
+	case strings.Contains(normalized, "currently unavailable") ||
+		strings.Contains(normalized, "we don't know when or if this item will be back in stock") ||
+		strings.Contains(normalized, "temporarily out of stock"):
+		return "不可售"
+	case strings.Contains(normalized, "buy used") ||
+		strings.Contains(normalized, "used:") ||
+		strings.Contains(normalized, "sold by amazon resale"):
+		return "二手跟卖"
+	case strings.Contains(normalized, "no featured offers available"):
+		return "没有购物车"
+	default:
+		return ""
+	}
+}
+
 func calculateDisplayDiscount(listPriceText, priceText string) string {
 	listPrice, ok := extractMoneyValue(listPriceText)
 	if !ok {
@@ -567,126 +621,6 @@ func extractChoiceValue(doc *goquery.Document) string {
 	return ""
 }
 
-func extractAskRufusValue(doc *goquery.Document) string {
-	return strings.Join(extractAskRufusQuestions(doc), "\n")
-}
-
-func extractAskRufusQuestions(doc *goquery.Document) []string {
-	questions := make([]string, 0)
-	seen := make(map[string]bool)
-
-	addQuestion := func(text string) {
-		text = cleanAskRufusText(text)
-		if !isAskRufusQuestionText(text) {
-			return
-		}
-		key := strings.ToLower(text)
-		if seen[key] {
-			return
-		}
-		seen[key] = true
-		questions = append(questions, text)
-	}
-
-	containers := askRufusContainers(doc)
-	containers.Each(func(_ int, container *goquery.Selection) {
-		container.Find("button, a, [role=\"button\"], input[type=\"button\"], input[type=\"submit\"]").Each(func(_ int, node *goquery.Selection) {
-			text := selectionDisplayText(node)
-			if text == "" {
-				if value, ok := node.Attr("value"); ok {
-					text = value
-				} else if label, ok := node.Attr("aria-label"); ok {
-					text = label
-				}
-			}
-			addQuestion(text)
-		})
-
-		container.Find("*").Each(func(_ int, node *goquery.Selection) {
-			if node.Children().Length() > 0 {
-				return
-			}
-			addQuestion(selectionDisplayText(node))
-		})
-	})
-
-	return questions
-}
-
-func askRufusContainers(doc *goquery.Document) *goquery.Selection {
-	var containers *goquery.Selection
-	doc.Find("*").Each(func(_ int, node *goquery.Selection) {
-		if !isAskRufusContainer(node) {
-			return
-		}
-		if containers == nil {
-			containers = node
-			return
-		}
-		containers = containers.AddSelection(node)
-	})
-	if containers == nil {
-		return doc.Find("__amazon_crawler_no_ask_rufus_container__")
-	}
-	return containers
-}
-
-func isAskRufusContainer(node *goquery.Selection) bool {
-	tagName := goquery.NodeName(node)
-	if tagName == "html" || tagName == "body" {
-		return false
-	}
-
-	for _, attr := range []string{
-		"id",
-		"class",
-		"name",
-		"data-a-card-type",
-		"data-a-target",
-		"data-action",
-		"data-ask-rufus",
-		"data-csa-c-content-id",
-		"data-csa-c-slot-id",
-		"data-feature-name",
-	} {
-		value, ok := node.Attr(attr)
-		if ok && strings.Contains(strings.ToLower(value), "rufus") {
-			return true
-		}
-	}
-
-	text := cleanText(node.Text())
-	return strings.Contains(strings.ToLower(text), "ask rufus") && len(text) <= 2000
-}
-
-func selectionDisplayText(selection *goquery.Selection) string {
-	clone := selection.Clone()
-	clone.Find("script, style, noscript").Remove()
-	return cleanText(clone.Text())
-}
-
-func cleanAskRufusText(text string) string {
-	text = strings.TrimPrefix(cleanText(text), "Ask Rufus")
-	return strings.TrimSpace(text)
-}
-
-func isAskRufusQuestionText(text string) bool {
-	lower := strings.ToLower(strings.TrimSpace(text))
-	if lower == "" {
-		return false
-	}
-	if lower == "ask rufus" || lower == "ask something else" || lower == "click to see full view" {
-		return false
-	}
-	if strings.Contains(lower, "report an issue") || strings.Contains(lower, "see more product details") {
-		return false
-	}
-	if len([]rune(text)) < 4 || len([]rune(text)) > 180 {
-		return false
-	}
-	return true
-}
-
 func extractReviewCountValue(text string) int {
 	text = strings.ReplaceAll(text, ",", "")
 	match := firstNumberRe.FindString(text)
@@ -741,7 +675,7 @@ func inspectionRows(results []LinkInspectionResult) [][]string {
 			r.PromoCode,
 			r.Keep,
 			r.Choice,
-			r.AskRufus,
+			r.PriceStatus,
 		})
 	}
 	return rows
@@ -808,7 +742,7 @@ func worksheetXML(rows [][]string) string {
 	builder.WriteString(`<sheetViews><sheetView workbookViewId="0"/></sheetViews>`)
 	builder.WriteString(`<sheetFormatPr defaultRowHeight="15"/>`)
 	builder.WriteString(`<cols>`)
-	widths := []float64{55, 36, 14, 12, 12, 12, 12, 12, 10, 12, 18, 18, 18, 55, 18, 45}
+	widths := []float64{55, 36, 14, 12, 12, 12, 12, 12, 10, 12, 18, 18, 18, 55, 18, 14}
 	for i, width := range widths {
 		builder.WriteString(fmt.Sprintf(`<col min="%d" max="%d" width="%.2f" customWidth="1"/>`, i+1, i+1, width))
 	}

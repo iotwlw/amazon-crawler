@@ -58,14 +58,6 @@ func TestExtractLinkInspectionFields(t *testing.T) {
   <span id="primeExclusivePricingMessage"><span class="a-size-base">$49.99</span></span>
   <div id="NEW_1_nostos_badge">Customers usually keep this item.</div>
   <div id="acBadge_feature_div"><div><span><span><span>    Amazon's  Choice   </span></span></span></div><span>Overall Pick</span></div>
-  <div id="ask-rufus-btf">
-    <div>Ask Rufus</div>
-    <button>Are these compatible with a switch?</button>
-    <button>How bright is each light?</button>
-    <button>Why you might like this</button>
-    <button>Compare with similar</button>
-    <button>Ask something else</button>
-  </div>
 </body>
 </html>`
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
@@ -84,6 +76,7 @@ func TestExtractLinkInspectionFields(t *testing.T) {
 	assertEqual(t, "product", result.Product, "Lightdot 320W LED Wall Pack Lights")
 	assertEqual(t, "asin", result.ASIN, "B0FNMPQSJC")
 	assertEqual(t, "price", result.Price, "$199.99")
+	assertEqual(t, "price status", result.PriceStatus, " ")
 	assertEqual(t, "coupon", result.Coupon, "10%")
 	assertEqual(t, "deal", result.IsDeal, "Deal")
 	assertEqual(t, "prime", result.PrimeExclusive, "$49.99")
@@ -97,7 +90,39 @@ func TestExtractLinkInspectionFields(t *testing.T) {
 	assertEqual(t, "promo check", result.PromoCheck, "")
 	assertEqual(t, "keep", result.Keep, "Customers usually keep this item.")
 	assertEqual(t, "choice", result.Choice, "Amazon's  Choice")
-	assertEqual(t, "ask rufus", result.AskRufus, "Are these compatible with a switch?\nHow bright is each light?\nWhy you might like this\nCompare with similar")
+}
+
+func TestExtractPriceStatusValue(t *testing.T) {
+	cases := []struct {
+		name string
+		html string
+		want string
+	}{
+		{
+			name: "unavailable",
+			html: `<html><body><div id="availability"><span>Currently unavailable.</span><span>We don't know when or if this item will be back in stock.</span></div></body></html>`,
+			want: "不可售",
+		},
+		{
+			name: "buy used",
+			html: `<html><body><div id="rightCol"><span>Buy used: $305.01</span><span>Used: Like New</span><span>Sold by Amazon Resale</span></div></body></html>`,
+			want: "二手跟卖",
+		},
+		{
+			name: "no featured offer",
+			html: `<html><body><div id="rightCol"><span>No featured offers available</span><a>See All Buying Options</a></div></body></html>`,
+			want: "没有购物车",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(tc.html))
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertEqual(t, tc.name, extractPriceStatusValue(doc), tc.want)
+		})
+	}
 }
 
 func TestChoiceFallsBackToContainerButNormalizes(t *testing.T) {
@@ -108,26 +133,6 @@ func TestChoiceFallsBackToContainerButNormalizes(t *testing.T) {
 	}
 
 	assertEqual(t, "choice", extractChoiceValue(doc), "Amazon's  Choice")
-}
-
-func TestExtractAskRufusQuestionsFromTextContainer(t *testing.T) {
-	html := `
-<html>
-<body>
-  <section>
-    <div>Ask Rufus</div>
-    <span role="button">Does the photocell work in fog?</span>
-    <span role="button">Why you might like this</span>
-    <span role="button">Ask something else</span>
-  </section>
-</body>
-</html>`
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	assertEqual(t, "ask rufus", extractAskRufusValue(doc), "Does the photocell work in fog?\nWhy you might like this")
 }
 
 func TestCalculateDisplayDiscountFromListPriceAndPrice(t *testing.T) {
@@ -164,9 +169,15 @@ func TestExtractCouponValueIgnoresPromoScripts(t *testing.T) {
 
 func TestWriteInspectionXLSX(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "inspection.xlsx")
+	if containsString(inspectionHeaders, "Ask Rufus问题") {
+		t.Fatal("Ask Rufus column should not be present")
+	}
+	if inspectionHeaders[len(inspectionHeaders)-1] != "价格状态" {
+		t.Fatalf("last header = %q, want 价格状态", inspectionHeaders[len(inspectionHeaders)-1])
+	}
 	rows := [][]string{
 		inspectionHeaders,
-		{"Product", "https://www.amazon.com/dp/B0FNMPQSJC", "B0FNMPQSJC", "$199.99", "10%", " ", " ", "-32%", "4.3", "7", "", "", "", "", "Amazon's Choice", "How bright is each light?"},
+		{"Product", "https://www.amazon.com/dp/B0FNMPQSJC", "B0FNMPQSJC", "$199.99", "10%", " ", " ", "-32%", "4.3", "7", "", "", "", "", "Amazon's Choice", " "},
 	}
 	if err := writeInspectionXLSX(out, rows); err != nil {
 		t.Fatal(err)
@@ -203,6 +214,15 @@ func TestWriteInspectionXLSX(t *testing.T) {
 	if !foundSheet {
 		t.Fatal("sheet1.xml not found")
 	}
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func assertEqual(t *testing.T, name, got, want string) {
