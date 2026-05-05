@@ -73,8 +73,10 @@ type flagStruct struct {
 	config_file string
 	serve       string // HTTP 服务模式，值为监听地址如 ":8080"
 	asin        string // ASIN 列表，逗号分隔
-	domain      string // 指定亚马逊域名（仅 ASIN 模式有效）
+	domain      string // 指定亚马逊域名（ASIN/链接巡检模式有效）
 	brand       bool   // 品牌巡查模式
+	linkFile    string // 链接巡检输入文件
+	linkOutput  string // 链接巡检输出 xlsx 文件
 }
 
 var app appConfig
@@ -196,9 +198,33 @@ func init_flag() flagStruct {
 	flag.StringVar(&f.config_file, "c", "config.yaml", "打开配置文件")
 	flag.StringVar(&f.serve, "serve", "", "启动 HTTP 服务模式，指定监听地址如 :8080")
 	flag.StringVar(&f.asin, "asin", "", "ASIN 列表，逗号分隔（如：B08N5WRWNW,B07XYZ）")
-	flag.StringVar(&f.domain, "domain", "www.amazon.com.mx", "亚马逊域名（仅 ASIN 模式有效）")
+	flag.StringVar(&f.domain, "domain", "", "亚马逊域名（ASIN/链接巡检模式有效；ASIN 模式默认 www.amazon.com.mx）")
 	flag.BoolVar(&f.brand, "brand", false, "启动品牌巡查模式")
+	flag.StringVar(&f.linkFile, "link-file", "", "启动链接巡检模式，指定 ASIN/商品链接列表文本文件")
+	flag.StringVar(&f.linkOutput, "link-output", "", "链接巡检 xlsx 输出文件（默认 output/link_inspection_时间.xlsx）")
 	flag.Parse()
+	return f
+}
+
+func prepareModeDomain(f flagStruct) flagStruct {
+	if f.asin != "" {
+		if f.domain == "" {
+			f.domain = "www.amazon.com.mx"
+		}
+		app.Domain = f.domain
+	}
+	if f.linkFile != "" {
+		if f.domain == "" {
+			if domain, err := detectDomainFromLinkFile(f.linkFile); err == nil && domain != "" {
+				f.domain = domain
+			} else if app.Domain != "" {
+				f.domain = app.Domain
+			} else {
+				f.domain = "www.amazon.com"
+			}
+		}
+		app.Domain = f.domain
+	}
 	return f
 }
 
@@ -216,6 +242,7 @@ func normalizeString(s string) string {
 func main() {
 	f := init_flag()
 	init_config(f)
+	f = prepareModeDomain(f)
 	init_rebots()
 	init_mysql()
 	init_network()
@@ -225,6 +252,15 @@ func main() {
 	if f.brand {
 		// 品牌巡查模式
 		brandMain()
+		return
+	} else if f.linkFile != "" {
+		// 链接巡检模式
+		log.Infof("启动链接巡检模式")
+		inspector := NewLinkInspector(f.linkFile, f.domain, f.linkOutput)
+		if err := inspector.Run(); err != nil {
+			log.Errorf("链接巡检执行失败: %v", err)
+			os.Exit(1)
+		}
 		return
 	} else if f.asin != "" {
 		// ASIN 评论爬虫模式
