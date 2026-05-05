@@ -58,6 +58,14 @@ func TestExtractLinkInspectionFields(t *testing.T) {
   <span id="primeExclusivePricingMessage"><span class="a-size-base">$49.99</span></span>
   <div id="NEW_1_nostos_badge">Customers usually keep this item.</div>
   <div id="acBadge_feature_div"><div><span><span><span>    Amazon's  Choice   </span></span></span></div><span>Overall Pick</span></div>
+  <div id="ask-rufus-btf">
+    <div>Ask Rufus</div>
+    <button>Are these compatible with a switch?</button>
+    <button>How bright is each light?</button>
+    <button>Why you might like this</button>
+    <button>Compare with similar</button>
+    <button>Ask something else</button>
+  </div>
 </body>
 </html>`
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
@@ -89,6 +97,7 @@ func TestExtractLinkInspectionFields(t *testing.T) {
 	assertEqual(t, "promo check", result.PromoCheck, "")
 	assertEqual(t, "keep", result.Keep, "Customers usually keep this item.")
 	assertEqual(t, "choice", result.Choice, "Amazon's  Choice")
+	assertEqual(t, "ask rufus", result.AskRufus, "Are these compatible with a switch?\nHow bright is each light?\nWhy you might like this\nCompare with similar")
 }
 
 func TestChoiceFallsBackToContainerButNormalizes(t *testing.T) {
@@ -99,6 +108,26 @@ func TestChoiceFallsBackToContainerButNormalizes(t *testing.T) {
 	}
 
 	assertEqual(t, "choice", extractChoiceValue(doc), "Amazon's  Choice")
+}
+
+func TestExtractAskRufusQuestionsFromTextContainer(t *testing.T) {
+	html := `
+<html>
+<body>
+  <section>
+    <div>Ask Rufus</div>
+    <span role="button">Does the photocell work in fog?</span>
+    <span role="button">Why you might like this</span>
+    <span role="button">Ask something else</span>
+  </section>
+</body>
+</html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertEqual(t, "ask rufus", extractAskRufusValue(doc), "Does the photocell work in fog?\nWhy you might like this")
 }
 
 func TestCalculateDisplayDiscountFromListPriceAndPrice(t *testing.T) {
@@ -137,7 +166,7 @@ func TestWriteInspectionXLSX(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "inspection.xlsx")
 	rows := [][]string{
 		inspectionHeaders,
-		{"Product", "https://www.amazon.com/dp/B0FNMPQSJC", "B0FNMPQSJC", "$199.99", "10%", " ", " ", "-32%", "4.3", "7", "", "", "", "", "Amazon's Choice"},
+		{"Product", "https://www.amazon.com/dp/B0FNMPQSJC", "B0FNMPQSJC", "$199.99", "10%", " ", " ", "-32%", "4.3", "7", "", "", "", "", "Amazon's Choice", "How bright is each light?"},
 	}
 	if err := writeInspectionXLSX(out, rows); err != nil {
 		t.Fatal(err)
