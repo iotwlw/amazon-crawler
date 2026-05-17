@@ -14,12 +14,13 @@ echo.
 
 :: 检查配置文件
 if not exist "config.yaml" (
-    echo [错误] 配置文件 config.yaml 不存在
-    echo.
-    echo 请先复制配置模板:
-    echo   copy config.yaml.save config.yaml
-    echo.
-    echo 然后编辑 config.yaml 配置数据库连接等参数
+    if exist "config.yaml.example" (
+        echo [信息] 未找到 config.yaml，正在从 config.yaml.example 创建...
+        copy /Y "config.yaml.example" "config.yaml" > nul
+        echo [提示] 已生成默认配置，请先编辑 config.yaml 后重新运行
+    ) else (
+        echo [错误] 配置文件 config.yaml 不存在，且缺少模板 config.yaml.example
+    )
     pause
     exit /b 1
 )
@@ -28,6 +29,12 @@ if not exist "config.yaml" (
 if not exist "amazon-crawler.exe" (
     echo [信息] 可执行文件不存在，开始编译...
     echo.
+    where go > nul 2>&1
+    if errorlevel 1 (
+        echo [错误] 未找到 go 命令，无法自动编译
+        pause
+        exit /b 1
+    )
     go build -o amazon-crawler.exe
     if errorlevel 1 (
         echo [错误] 编译失败

@@ -3,10 +3,8 @@ package main
 import (
 	"database/sql"
 	"fmt"
-	"math/rand"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	_ "github.com/go-sql-driver/mysql"
@@ -111,10 +109,14 @@ func (seller *sellerStruct) main() error {
 		}
 		seller.url = fmt.Sprintf("https://%s/sp?ie=UTF8&seller=%s", app.Domain, seller.seller_id)
 
-		if err := robot.IsAllow(userAgent, seller.url); err != nil {
+		fp := GetCurrentFingerprint()
+		if err := robot.IsAllow(fp.UserAgent, seller.url); err != nil {
 			log.Errorf("%v", err)
 			continue
 		}
+
+		// 添加请求间隔
+		SmartDelay("normal")
 
 		for err := seller.request(); err != nil; {
 			log.Error(err)
@@ -122,9 +124,15 @@ func (seller *sellerStruct) main() error {
 				// Cookie 失效，标记失效并尝试获取新的
 				if err := app.handleCookieInvalid(); err != nil {
 					log.Errorf("处理 cookie 失效失败: %v", err)
+				} else {
+					RotateFingerprint()
 				}
+				SmartDelay("captcha")
+			} else if err == ERROR_NOT_503 {
+				SmartDelay("503")
+			} else {
+				SmartDelay("error")
 			}
-			sleep(120)
 		}
 
 		seller.trnCheck()
@@ -150,21 +158,19 @@ func (seller *sellerStruct) request() error {
 
 	log.Infof("请求链接 %s", seller.url)
 
-	// 添加随机延迟 2-5 秒（防止请求过快）
-	delay := 2 + rand.Intn(3)
-	time.Sleep(time.Duration(delay) * time.Second)
-
 	client := get_client()
 	req, err := http.NewRequest("GET", seller.url, nil)
 	if err != nil {
 		return err
 	}
 
-	// 使用统一的请求头设置
+	if _, err := app.get_cookie(); err != nil {
+		log.Error(err)
+	}
 	app.setCommonHeaders(req)
-
-	// 设置卖家页面特定的 Referer
-	req.Header.Set("Referer", fmt.Sprintf("https://%s/?k=Hardware+electricia%%27n&crid=3CR8DCX0B3L5U&sprefix=hardware+electricia%%27n%%2Caps%%2C714&ref=nb_sb_noss", app.Domain))
+	if referer := GetRandomReferer(app.Domain); referer != "" {
+		req.Header.Set("Referer", referer)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {

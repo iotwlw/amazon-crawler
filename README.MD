@@ -16,38 +16,52 @@
 
 [下载](https://github.com/tengfei-xy/amazon-crawler/releases)
 
+## 快速开始
+
+Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\init.ps1 -Build
+```
+
+该脚本会完成以下事情：
+
+1. 下载 Go 依赖
+2. 在 `config.yaml` 不存在时，从 `config.yaml.example` 生成默认配置
+3. 可选构建 `amazon-crawler.exe`
+
 ## 数据库
 因为数据变更，不自动执行
 > 仅支持mysql
 
-导入[SQL文件](https://github.com/tengfei-xy/amazon-crawler/blob/main/sql/ddl.sql)并初始化数据库参考命令：
+导入 [sql/ddl.sql](sql/ddl.sql) 并初始化数据库：
 
 ```bash
 # 执行后，将丢弃原表的数据
-# bin/mysql -u root -p < ddl.sql
+mysql -u root -p < sql/ddl.sql
 ```
 
-由于工具需要关键词来进行搜索，所以需要初始化一些关键词，参考[关键词数据库文件]((https://github.com/tengfei-xy/amazon-crawler/blob/main/sql/category.sql))
+由于工具需要关键词来进行搜索，所以需要初始化一些关键词，参考 [sql/category.sql](sql/category.sql)。
 
 导入命令
 
 ```bash
 # 此语句应建表后立即使用
-# bin/mysql -D amazon -u root -p < category.sql
+mysql -D taotie -u root -p < sql/category.sql
 # 若只添加测试使用单条命令，使用下列语句,并设置最低的优先级为0
-# insert into `category` (`zh_key`,`en_key`,priority) VALUES ('音响','speakers',0);
+# insert into `amc_category` (`zh_key`,`en_key`,priority) VALUES ('音响','speakers',0);
 ```
 
-创建amazone用户
+默认数据库名为 `taotie`。如需创建专用用户，可使用：
 
 ```sql
 # mysql 5.7.x
-GRANT ALL PRIVILEGES ON amazon.* to 'amazon'@'%'  identified by 'password';
+GRANT ALL PRIVILEGES ON taotie.* TO 'amazon'@'%' IDENTIFIED BY 'password';
 flush privileges;
 
 # mysql 8.x
 create user 'amazon'@'%' identified by 'password';
-GRANT ALL PRIVILEGES ON amazon.* TO 'amazon'@'%' WITH GRANT OPTION;
+GRANT ALL PRIVILEGES ON taotie.* TO 'amazon'@'%' WITH GRANT OPTION;
 flush privileges;
 ```
 
@@ -55,13 +69,17 @@ flush privileges;
 
 ## 配置文件
 
-复制config.yaml.save为config.yaml
+复制 `config.yaml.example` 为 `config.yaml`，或直接运行：
 
-配置文件具体含义参考[文件中的注释](https://github.com/tengfei-xy/amazon-crawler/blob/main/config.yaml.save)
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\init.ps1
+```
+
+配置文件具体含义参考 [config.yaml.example](config.yaml.example) 中的注释。
 
 ## cookie
 
-你应该为每个配置文件中的host_id填充cookie，填充位置是数据库的cookie表，分别包含host_id和对应的cookie，
+你应该为每个配置文件中的 `host_id` 填充 Cookie，填充位置是数据库的 `amc_cookie` 表，至少包含 `host_id` 和对应的 `cookie`。
 
 cookie格式如下
 
@@ -88,15 +106,34 @@ session-id=xxxx; session-id-time=2082787201l; i18n-prefs=GBP; sp-cdn="L5Z9:JP"; 
 从数据库 `amc_category` 表读取关键词，自动循环执行：
 
 ```bash
-./amazon-crawler -c config.yaml
+go run . -c config.yaml
+# 或 Windows 下执行
+.\amazon-crawler.exe -c config.yaml
 ```
+
+## 链接巡检
+
+准备一个文本文件，一行一个 Amazon 商品链接或 ASIN：
+
+```text
+https://www.amazon.com/dp/B0FNMPQSJC
+B0DWWWP4FF
+```
+
+执行批量巡检：
+
+```powershell
+.\amazon-crawler.exe -c config.yaml -link-file .\asins.txt -domain www.amazon.com -link-output .\output\link_inspection.xlsx
+```
+
+输出 XLSX 会保留输入顺序。
 
 ## HTTP 服务模式（API 调用）
 
 启动 HTTP 服务，通过 API 接收任务：
 
 ```bash
-./amazon-crawler -c config.yaml -serve :8080
+go run . -c config.yaml -serve :8080
 ```
 
 ### API 接口

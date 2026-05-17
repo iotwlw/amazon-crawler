@@ -3,11 +3,9 @@ package main
 import (
 	"database/sql"
 	"fmt"
-	"math/rand"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	log "github.com/tengfei-xy/go-log"
@@ -77,8 +75,12 @@ func (s *searchStruct) main() error {
 				s.start--
 				log.Warn("遇到503错误，尝试获取新的Cookie")
 				if handleErr := app.handleCookieInvalid(); handleErr != nil {
-					log.Errorf("获取新Cookie失败: %v，等待120秒后重试", handleErr)
-					sleep(120)
+					log.Errorf("获取新Cookie失败: %v，等待后重试", handleErr)
+					SmartDelay("503")
+				} else {
+					// Cookie 切换成功，同时轮换指纹
+					RotateFingerprint()
+					SmartDelay("503")
 				}
 				continue
 
@@ -137,7 +139,8 @@ func (s *searchStruct) set_en_key() string {
 func (s *searchStruct) request(seq int) (*goquery.Document, error) {
 	url := fmt.Sprintf("https://%s/s?k=%s&page=%d&dc&crid=2V9436DZJ6IJF&qid=1699839233&sprefix=clothe%%2Caps%%2C552&ref=sr_pg_2", app.Domain, s.en_key, seq)
 	// 链接增加 &dc 表示直接搜索，避免转移到其他关键词
-	err := robot.IsAllow(userAgent, url)
+	fp := GetCurrentFingerprint()
+	err := robot.IsAllow(fp.UserAgent, url)
 	if err != nil {
 		return nil, err
 	}
@@ -149,15 +152,14 @@ func (s *searchStruct) request(seq int) (*goquery.Document, error) {
 		return nil, err
 	}
 
-	// 添加随机延迟 2-5 秒（防止请求过快）
-	delay := 2 + rand.Intn(3)
-	time.Sleep(time.Duration(delay) * time.Second)
-
-	// 使用统一的请求头设置
+	SmartDelay("normal")
+	if _, err := app.get_cookie(); err != nil {
+		log.Error(err)
+	}
 	app.setCommonHeaders(req)
-
-	// 设置搜索页面特定的 Referer
-	req.Header.Set("Referer", fmt.Sprintf("https://%s/?k=Hardware+electricia%%27n&crid=3CR8DCX0B3L5U&sprefix=hardware+electricia%%27n%%2Caps%%2C714&ref=nb_sb_noss", app.Domain))
+	if referer := GetRandomReferer(app.Domain); referer != "" {
+		req.Header.Set("Referer", referer)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -205,11 +207,15 @@ func (s *searchStruct) get_product_url(doc *goquery.Document) {
 		}
 	}()
 
-	res := doc.Find("div[class~=s-search-results]").First()
+	res := doc.Find("div.s-search-results").First()
 
 	if res.Length() == 0 {
-		log.Errorf("错误的页面结构 关键词:%s", s.zh_key)
-		return
+		// 备选选择器
+		res = doc.Find(".s-main-slot").First()
+		if res.Length() == 0 {
+			log.Errorf("错误的页面结构 关键词:%s", s.zh_key)
+			return
+		}
 	}
 	// len res.Find("div[data-index]")
 	data_index := res.Find("div[data-index]")

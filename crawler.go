@@ -230,7 +230,8 @@ func crawlProduct(keyword string) error {
 			continue
 		}
 		url = "https://" + app.Domain + url + param
-		if err := robot.IsAllow(userAgent, url); err != nil {
+		fp := GetCurrentFingerprint()
+		if err := robot.IsAllow(fp.UserAgent, url); err != nil {
 			log.Errorf("%v", err)
 			continue
 		}
@@ -337,7 +338,8 @@ func crawlSeller(keyword string) error {
 		}
 		seller.url = "https://" + app.Domain + "/sp?ie=UTF8&seller=" + seller.seller_id
 
-		if err := robot.IsAllow(userAgent, seller.url); err != nil {
+		fp := GetCurrentFingerprint()
+		if err := robot.IsAllow(fp.UserAgent, seller.url); err != nil {
 			log.Errorf("%v", err)
 			continue
 		}
@@ -383,7 +385,8 @@ func crawlSearchInMemory(keyword string, categoryID int64) ([]*ProductInfo, erro
 	// 构建搜索URL
 	searchURL := fmt.Sprintf("https://%s/s?k=%s&page=1&dc", app.Domain, formattedKeyword)
 
-	if err := robot.IsAllow(userAgent, searchURL); err != nil {
+	fp := GetCurrentFingerprint()
+	if err := robot.IsAllow(fp.UserAgent, searchURL); err != nil {
 		log.Errorf("robots.txt 不允许: %v", err)
 		return nil, err
 	}
@@ -395,10 +398,8 @@ func crawlSearchInMemory(keyword string, categoryID int64) ([]*ProductInfo, erro
 		return nil, err
 	}
 
-	// 设置请求头
-	req.Header.Set("Accept", `text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8`)
-	req.Header.Set("Accept-Language", `zh-CN,zh;q=0.9`)
-	req.Header.Set("User-Agent", userAgent)
+	// 设置请求头 - 使用统一的指纹系统
+	ApplyFingerprint(req, GetRandomReferer(app.Domain))
 	if _, err := app.get_cookie(); err == nil {
 		req.Header.Set("Cookie", app.cookie)
 	}
@@ -618,7 +619,8 @@ func crawlProductsFromMemory(products []*ProductInfo, keyword string) (map[strin
 		// 构建完整URL
 		fullURL := "https://" + app.Domain + p.URL + p.Param
 
-		if err := robot.IsAllow(userAgent, fullURL); err != nil {
+		fp := GetCurrentFingerprint()
+		if err := robot.IsAllow(fp.UserAgent, fullURL); err != nil {
 			log.Errorf("robots.txt 不允许: %v", err)
 			continue
 		}
@@ -713,11 +715,8 @@ func fetchSellerInfoFromProduct(productURL string) (sellerID, sellerName, brandN
 		return "", "", "", err
 	}
 
-	// 设置请求头
-	req.Header.Set("Authority", app.Domain)
-	req.Header.Set("Accept", `text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8`)
-	req.Header.Set("Accept-Language", `zh-CN,zh;q=0.9`)
-	req.Header.Set("User-Agent", userAgent)
+	// 设置请求头 - 使用统一的指纹系统
+	ApplyFingerprint(req, GetRandomReferer(app.Domain))
 	if _, err := app.get_cookie(); err == nil {
 		req.Header.Set("Cookie", app.cookie)
 	}
@@ -887,7 +886,8 @@ func fetchSellerDetails(sellerMap map[string]*SellerInfo) ([]*SellerDetail, erro
 	for sellerID, info := range sellerMap {
 		sellerURL := fmt.Sprintf("https://%s/sp?ie=UTF8&seller=%s", app.Domain, sellerID)
 
-		if err := robot.IsAllow(userAgent, sellerURL); err != nil {
+		fp := GetCurrentFingerprint()
+		if err := robot.IsAllow(fp.UserAgent, sellerURL); err != nil {
 			log.Errorf("robots.txt 不允许: %v", err)
 			continue
 		}
@@ -957,11 +957,8 @@ func fetchSellerDetailFromPage(sellerURL string, info *SellerInfo) (*SellerDetai
 		return nil, err
 	}
 
-	// 设置请求头
-	req.Header.Set("Authority", app.Domain)
-	req.Header.Set("Accept", `text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8`)
-	req.Header.Set("Accept-Language", `zh-CN,zh;q=0.9`)
-	req.Header.Set("User-Agent", userAgent)
+	// 设置请求头 - 使用统一的指纹系统
+	ApplyFingerprint(req, GetRandomReferer(app.Domain))
 	if _, err := app.get_cookie(); err == nil {
 		req.Header.Set("Cookie", app.cookie)
 	}

@@ -2,11 +2,9 @@ package main
 
 import (
 	"fmt"
-	"math/rand"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	log "github.com/tengfei-xy/go-log"
@@ -75,12 +73,17 @@ func (product *productStruct) main() error {
 			continue
 		}
 		url = "https://" + app.Domain + url + param
-		if err := robot.IsAllow(userAgent, url); err != nil {
+		fp := GetCurrentFingerprint()
+		if err := robot.IsAllow(fp.UserAgent, url); err != nil {
 			log.Errorf("%v", err)
 			continue
 		}
 
 		log.Infof("查找商品链接 ID:%d url:%s", primary_id, url)
+
+		// 添加请求间隔
+		SmartDelay("normal")
+
 		err := product.request(url)
 		if err != nil {
 			if err == ERROR_NOT_SELLER_URL {
@@ -89,7 +92,7 @@ func (product *productStruct) main() error {
 			} else if err == ERROR_NOT_404 || err == ERROR_NOT_503 {
 				product.update_status(primary_id, MYSQL_PRODUCT_STATUS_ERROR_OVER, "", "", "")
 				log.Error(err)
-				sleep(300)
+				SmartDelay("error")
 				continue
 			} else if err == ERROR_VERIFICATION {
 				// Cookie 失效，标记失效并尝试获取新的
@@ -97,13 +100,15 @@ func (product *productStruct) main() error {
 				log.Error(err)
 				if err := app.handleCookieInvalid(); err != nil {
 					log.Errorf("处理 cookie 失效失败: %v", err)
+				} else {
+					RotateFingerprint()
 				}
-				sleep(300)
+				SmartDelay("captcha")
 				continue
 			} else {
 				product.update_status(primary_id, MYSQL_PRODUCT_STATUS_ERROR_OVER, "", "", "")
 				log.Error(err)
-				sleep(300)
+				SmartDelay("error")
 				continue
 
 			}
@@ -146,21 +151,19 @@ func (product *productStruct) main() error {
 }
 
 func (product *productStruct) request(url string) error {
-	// 添加随机延迟 2-5 秒（防止请求过快）
-	delay := 2 + rand.Intn(3)
-	time.Sleep(time.Duration(delay) * time.Second)
-
 	client := get_client()
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return err
 	}
 
-	// 使用统一的请求头设置
+	if _, err := app.get_cookie(); err != nil {
+		log.Error(err)
+	}
 	app.setCommonHeaders(req)
-
-	// 设置产品页面特定的 Referer
-	req.Header.Set("Referer", fmt.Sprintf("https://%s/?k=Hardware+electricia%%27n&crid=3CR8DCX0B3L5U&sprefix=hardware+electricia%%27n%%2Caps%%2C714&ref=nb_sb_noss", app.Domain))
+	if referer := GetRandomReferer(app.Domain); referer != "" {
+		req.Header.Set("Referer", referer)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
