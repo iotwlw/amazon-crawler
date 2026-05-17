@@ -43,7 +43,6 @@ var (
 		"PromoCode",
 		"Keep",
 		"Choice",
-		"价格状态",
 	}
 )
 
@@ -68,7 +67,6 @@ type LinkInspectionResult struct {
 	Product         string
 	ASIN            string
 	Price           string
-	PriceStatus     string
 	Coupon          string
 	IsDeal          string
 	PrimeExclusive  string
@@ -262,13 +260,15 @@ func extractLinkInspectionFields(doc *goquery.Document, item LinkInspectionItem)
 		rating = ""
 	}
 	price := extractCurrentPriceValue(doc)
+	if strings.TrimSpace(price) == "" {
+		price = extractPriceStatusValue(doc)
+	}
 
 	result := LinkInspectionResult{
 		Item:            item,
 		Product:         textBySelectors(doc, []string{"#productTitle"}),
 		ASIN:            asin,
 		Price:           price,
-		PriceStatus:     defaultSpace(extractPriceStatusValue(doc)),
 		Coupon:          defaultSpace(extractCouponValue(doc)),
 		IsDeal:          defaultSpace(textBySelectors(doc, []string{"#dealBadgeSupportingText", "#dealBadge_feature_div"})),
 		PrimeExclusive:  defaultSpace(textBySelectors(doc, []string{"#primeExclusivePricingMessage .a-size-base", "#primeExclusivePricingMessage"})),
@@ -675,7 +675,6 @@ func inspectionRows(results []LinkInspectionResult) [][]string {
 			r.PromoCode,
 			r.Keep,
 			r.Choice,
-			r.PriceStatus,
 		})
 	}
 	return rows
@@ -742,7 +741,7 @@ func worksheetXML(rows [][]string) string {
 	builder.WriteString(`<sheetViews><sheetView workbookViewId="0"/></sheetViews>`)
 	builder.WriteString(`<sheetFormatPr defaultRowHeight="15"/>`)
 	builder.WriteString(`<cols>`)
-	widths := []float64{55, 36, 14, 12, 12, 12, 12, 12, 10, 12, 18, 18, 18, 55, 18, 14}
+	widths := []float64{55, 36, 14, 12, 12, 12, 12, 12, 10, 12, 18, 18, 18, 55, 18}
 	for i, width := range widths {
 		builder.WriteString(fmt.Sprintf(`<col min="%d" max="%d" width="%.2f" customWidth="1"/>`, i+1, i+1, width))
 	}

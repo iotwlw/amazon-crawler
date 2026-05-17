@@ -76,7 +76,6 @@ func TestExtractLinkInspectionFields(t *testing.T) {
 	assertEqual(t, "product", result.Product, "Lightdot 320W LED Wall Pack Lights")
 	assertEqual(t, "asin", result.ASIN, "B0FNMPQSJC")
 	assertEqual(t, "price", result.Price, "$199.99")
-	assertEqual(t, "price status", result.PriceStatus, " ")
 	assertEqual(t, "coupon", result.Coupon, "10%")
 	assertEqual(t, "deal", result.IsDeal, "Deal")
 	assertEqual(t, "prime", result.PrimeExclusive, "$49.99")
@@ -121,6 +120,41 @@ func TestExtractPriceStatusValue(t *testing.T) {
 				t.Fatal(err)
 			}
 			assertEqual(t, tc.name, extractPriceStatusValue(doc), tc.want)
+		})
+	}
+}
+
+func TestPriceStatusBackfillsOnlyMissingPrice(t *testing.T) {
+	item := LinkInspectionItem{
+		Original: "https://www.amazon.com/dp/B0FNMPQSJC",
+		URL:      "https://www.amazon.com/dp/B0FNMPQSJC",
+		ASIN:     "B0FNMPQSJC",
+		Domain:   "www.amazon.com",
+	}
+	cases := []struct {
+		name string
+		html string
+		want string
+	}{
+		{
+			name: "keeps current price",
+			html: `<html><body><input id="ASIN" value="B0FNMPQSJC"/><div id="corePrice_feature_div"><span class="a-offscreen">$199.99</span></div><div id="availability">Currently unavailable.</div></body></html>`,
+			want: "$199.99",
+		},
+		{
+			name: "fills missing price from status",
+			html: `<html><body><input id="ASIN" value="B0FNMPQSJC"/><div id="availability">Currently unavailable.</div></body></html>`,
+			want: "不可售",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(tc.html))
+			if err != nil {
+				t.Fatal(err)
+			}
+			result := extractLinkInspectionFields(doc, item)
+			assertEqual(t, "price", result.Price, tc.want)
 		})
 	}
 }
@@ -172,12 +206,15 @@ func TestWriteInspectionXLSX(t *testing.T) {
 	if containsString(inspectionHeaders, "Ask Rufus问题") {
 		t.Fatal("Ask Rufus column should not be present")
 	}
-	if inspectionHeaders[len(inspectionHeaders)-1] != "价格状态" {
-		t.Fatalf("last header = %q, want 价格状态", inspectionHeaders[len(inspectionHeaders)-1])
+	if containsString(inspectionHeaders, "价格状态") {
+		t.Fatal("价格状态 column should not be present")
+	}
+	if inspectionHeaders[len(inspectionHeaders)-1] != "Choice" {
+		t.Fatalf("last header = %q, want Choice", inspectionHeaders[len(inspectionHeaders)-1])
 	}
 	rows := [][]string{
 		inspectionHeaders,
-		{"Product", "https://www.amazon.com/dp/B0FNMPQSJC", "B0FNMPQSJC", "$199.99", "10%", " ", " ", "-32%", "4.3", "7", "", "", "", "", "Amazon's Choice", " "},
+		{"Product", "https://www.amazon.com/dp/B0FNMPQSJC", "B0FNMPQSJC", "$199.99", "10%", " ", " ", "-32%", "4.3", "7", "", "", "", "", "Amazon's Choice"},
 	}
 	if err := writeInspectionXLSX(out, rows); err != nil {
 		t.Fatal(err)
