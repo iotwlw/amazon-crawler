@@ -362,14 +362,14 @@ func (seller *sellerStruct) syncToAmazonShop() error {
 
 	shopUrl := fmt.Sprintf("https://%s/sp?ie=UTF8&seller=%s", app.Domain, seller.seller_id)
 
-	query := "SELECT id FROM tb_amazon_shop WHERE domain = ? AND shop_id = ?"
+	query := "SELECT id FROM tb_amazon_shop WHERE brand_name = ? AND shop_id = ?"
 	var existingId int
 	err := app.db.QueryRow(query, seller.keyword, seller.seller_id).Scan(&existingId)
 
 	if err == sql.ErrNoRows {
-		insertSQL := `INSERT INTO tb_amazon_shop 
-			(user_id, domain, shop_id, shop_name, shop_url, marketplace, 
-			 company_name, company_address, fb_1month, fb_3month, fb_12month, fb_lifetime, 
+		insertSQL := `INSERT INTO tb_amazon_shop
+			(user_id, brand_name, shop_id, shop_name, shop_url, marketplace,
+			 company_name, company_address, fb_1month, fb_3month, fb_12month, fb_lifetime,
 			 main_products, avg_price, estimated_monthly_sales, crawl_time, create_time, update_time)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`
 		_, err = app.db.Exec(insertSQL,
@@ -393,7 +393,7 @@ func (seller *sellerStruct) syncToAmazonShop() error {
 			log.Errorf("同步到 tb_amazon_shop 表失败: %v", err)
 			return err
 		}
-		log.Infof("成功同步到 tb_amazon_shop 表: domain=%s, shop_id=%s", seller.keyword, seller.seller_id)
+		log.Infof("成功同步到 tb_amazon_shop 表: brand_name=%s, shop_id=%s", seller.keyword, seller.seller_id)
 	} else if err != nil {
 		log.Errorf("查询 tb_amazon_shop 表失败: %v", err)
 		return err

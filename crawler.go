@@ -1217,21 +1217,21 @@ func batchSyncToAmazonShop(tx *sql.Tx, details []*SellerDetail) (int, error) {
 	count := 0
 	for _, d := range details {
 		shopURL := fmt.Sprintf("https://%s/sp?ie=UTF8&seller=%s", app.Domain, d.SellerID)
-		domain := strings.ToLower(d.Keyword)
+		brandName := strings.ToLower(d.Keyword)
 
 		// 检查是否存在
 		var existingID int
-		err := tx.QueryRow("SELECT id FROM tb_amazon_shop WHERE domain = ? AND shop_id = ?", domain, d.SellerID).Scan(&existingID)
+		err := tx.QueryRow("SELECT id FROM tb_amazon_shop WHERE brand_name = ? AND shop_id = ?", brandName, d.SellerID).Scan(&existingID)
 
 		if err == sql.ErrNoRows {
 			// 插入新记录
 			_, err = tx.Exec(`
 				INSERT INTO tb_amazon_shop
-					(user_id, domain, shop_id, shop_name, shop_url, marketplace,
+					(user_id, brand_name, shop_id, shop_name, shop_url, marketplace,
 					 company_name, company_address, fb_1month, fb_3month, fb_12month, fb_lifetime,
 					 main_products, avg_price, estimated_monthly_sales, crawl_time, create_time, update_time)
 				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 0, 0, NOW(), NOW(), NOW())
-			`, 1, domain, d.SellerID, d.SellerName, shopURL, "US",
+			`, 1, brandName, d.SellerID, d.SellerName, shopURL, "US",
 				d.Name, d.Address, d.FB1Month, d.FB3Month, d.FB12Month, d.FBLifetime)
 			if err != nil {
 				return 0, err

@@ -326,7 +326,7 @@ crawler.go: ExecuteCrawlWithStatus()
 |------|--------|------|
 | amc_category | en_key | 品牌名（原字段名为"英文关键词"） |
 | amc_product | keyword | 品牌名（商品来源品牌） |
-| tb_amazon_shop | domain | 品牌名（店铺所属品牌） |
+| tb_amazon_shop | brand_name | 品牌名（店铺所属品牌） |
 
 ### 核心表结构
 
@@ -397,7 +397,7 @@ updated_at  datetime    更新时间
 ```sql
 id                      int          主键，自增
 user_id                 int          用户ID（固定为1）
-domain                  varchar      品牌名（核心关联字段）
+brand_name              varchar      品牌名（核心关联字段）
 shop_id                 varchar      店铺ID，即 seller_id
 shop_name               varchar      店铺名称
 shop_url                varchar      店铺URL
@@ -411,7 +411,7 @@ fb_lifetime             int          总反馈数
 crawl_time              datetime     爬取时间
 create_time             datetime     创建时间
 update_time             datetime     更新时间
-唯一索引: (domain, shop_id)
+唯一索引: (user_id, brand_name, shop_id)
 ```
 
 ### 表关联关系
@@ -442,7 +442,7 @@ update_time             datetime     更新时间
                                                  ┌─────────────────┐
                                                  │ tb_amazon_shop  │
                                                  │  (外部店铺表)    │
-                                                 │ domain=品牌名    │
+                                                 │ brand_name=品牌名│
                                                  │ shop_id=卖家ID   │
                                                  └─────────────────┘
 ```

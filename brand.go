@@ -521,34 +521,33 @@ func (b *brandStruct) extractSellerDetails(doc *goquery.Document) {
 
 // saveToAmazonShop 保存店铺信息到 tb_amazon_shop
 func (b *brandStruct) saveToAmazonShop() error {
-	// domain 字段使用品牌名（小写）
-	domain := strings.ToLower(b.brandName)
+	brandName := strings.ToLower(b.brandName)
 	shopUrl := fmt.Sprintf("https://%s/sp?ie=UTF8&seller=%s", app.Domain, b.sellerID)
 
 	// 先查询是否存在
 	var existingId int
 	err := app.db.QueryRow(
-		"SELECT id FROM tb_amazon_shop WHERE domain = ? AND shop_id = ?",
-		domain, b.sellerID,
+		"SELECT id FROM tb_amazon_shop WHERE brand_name = ? AND shop_id = ?",
+		brandName, b.sellerID,
 	).Scan(&existingId)
 
 	if err == sql.ErrNoRows {
 		// 插入新记录
 		_, err = app.db.Exec(`
 			INSERT INTO tb_amazon_shop (
-				user_id, domain, shop_id, shop_name, shop_url, marketplace,
+				user_id, brand_name, shop_id, shop_name, shop_url, marketplace,
 				company_name, company_address,
 				fb_1month, fb_3month, fb_12month, fb_lifetime,
 				main_products, avg_price, estimated_monthly_sales,
 				crawl_time, create_time, update_time
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 0, 0, NOW(), NOW(), NOW())
-		`, 1, domain, b.sellerID, b.shopName, shopUrl, "US",
+		`, 1, brandName, b.sellerID, b.shopName, shopUrl, "US",
 			b.companyName, b.companyAddress,
 			b.fb1month, b.fb3month, b.fb12month, b.fbLifetime)
 		if err != nil {
 			return fmt.Errorf("插入 tb_amazon_shop 失败: %w", err)
 		}
-		log.Infof("成功插入 tb_amazon_shop: domain=%s, shop_id=%s", domain, b.sellerID)
+		log.Infof("成功插入 tb_amazon_shop: brand_name=%s, shop_id=%s", brandName, b.sellerID)
 	} else if err != nil {
 		return fmt.Errorf("查询 tb_amazon_shop 失败: %w", err)
 	} else {
