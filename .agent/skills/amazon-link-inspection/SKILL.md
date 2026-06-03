@@ -1,12 +1,12 @@
 ---
 name: amazon-link-inspection
 description: >-
-  Run amazon-crawler link inspection for Amazon ASIN/product URL text files and export XLSX reports. Use when the user says "链接巡检", "批量抓取", "亚马逊批量抓取", "ASIN批量抓取", "批量查询ASIN", "批量查询链接", "Ask Rufus", or asks to crawl/scrape/query Amazon product links from a text file with product, ASIN, price, coupon, deal, member price, calculated List Price discount, rating, review count, PromoCheck, Promotion, PromoCode, Keep, Choice, and Ask Rufus question columns.
+  Run amazon-crawler link inspection for Amazon ASIN/product URL text files and export XLSX reports. Use when the user says "链接巡检", "批量抓取", "亚马逊批量抓取", "ASIN批量抓取", "批量查询ASIN", "批量查询链接", or asks to crawl/scrape/query Amazon product links from a text file with product, ASIN, price, coupon, deal, member price, calculated List Price discount, rating, review count, PromoCheck, Promotion, PromoCode, Keep, Choice, Frequently returned item, and Newer model columns.
 ---
 
 # Amazon Link Inspection
 
-Use this skill to run the repo's built-in link inspection mode. It reads a text file containing Amazon product URLs or bare ASINs and writes an XLSX report with the EasySpider link inspection columns plus the Ask Rufus question column.
+Use this skill to run the repo's built-in link inspection mode. It reads a text file containing Amazon product URLs or bare ASINs and writes an XLSX report with the EasySpider link inspection columns plus the frequently returned item and newer model columns.
 
 ## Trigger Phrases
 
@@ -15,7 +15,6 @@ Use this skill to run the repo's built-in link inspection mode. It reads a text 
 - 批量查询ASIN
 - ASIN批量抓取
 - 亚马逊批量抓取
-- Ask Rufus
 
 ## Inputs
 
@@ -25,7 +24,7 @@ Use this skill to run the repo's built-in link inspection mode. It reads a text 
 
 ## Output Columns
 
-`产品, 原ASIN, ASIN, 价格, 优惠券, 是否秒杀, 会员专享, 显示折扣, 评级, 评价数量, PromoCheck, Promotion, PromoCode, Keep, Choice, Ask Rufus问题`
+`产品, 原ASIN, ASIN, 价格, 优惠券, 是否秒杀, 会员专享, 显示折扣, 评级, 评价数量, PromoCheck, Promotion, PromoCode, Keep, Choice, Frequently returned item, Newer model`
 
 ## Workflow
 
@@ -64,8 +63,9 @@ $log = "D:\AmazonCode\amazon-crawler\output\link_inspection_$stamp.log"
 
 - The mode preserves input order and duplicates, matching EasySpider's `removeDuplicate: 0` behavior.
 - The `原ASIN` column stores the original input line. The `ASIN` column stores the product page ASIN.
-- The `Ask Rufus问题` column stores visible Ask Rufus suggested questions from the product page, separated by newlines.
 - `显示折扣` is calculated from List Price and current price, so `List Price: $269.99` with `价格: $242.99` returns `-10%`.
 - `优惠券` is extracted from coupon text nodes and script/style content is stripped before matching, avoiding encoded-token false positives.
+- The `Frequently returned item` column stores the warning module text when Amazon shows "Frequently returned item".
+- The `Newer model` column stores the newer-model module text when Amazon shows "There is a newer model of this item".
 - The crawler reuses the repo's cookie rotation, browser fingerprint headers, robots.txt checks, proxy settings, and random request delay.
 - Promotion fields are parsed from product-page DOM. If Amazon hides a promotion behind dynamic browser-only UI, those fields may be blank while price/rating/review fields still populate.

@@ -18,6 +18,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	log "github.com/tengfei-xy/go-log"
+	"golang.org/x/net/html"
 )
 
 var (
@@ -43,6 +44,8 @@ var (
 		"PromoCode",
 		"Keep",
 		"Choice",
+		"Frequently returned item",
+		"Newer model",
 	}
 )
 
@@ -78,6 +81,8 @@ type LinkInspectionResult struct {
 	PromoCode       string
 	Keep            string
 	Choice          string
+	FrequentReturn  string
+	NewerModel      string
 	ErrorMessage    string
 }
 
@@ -276,11 +281,7 @@ func extractLinkInspectionFields(doc *goquery.Document, item LinkInspectionItem)
 		Rating:          rating,
 		ReviewCount:     reviewCount,
 		PromoCheck:      extractPromoCheckValue(doc),
-		Promotion: textBySelectors(doc, []string{
-			"#promoPriceBlockMessage_feature_div .promoPriceBlockMessage > div:nth-child(2) label",
-			"label[id^=\"greenBadge\"]",
-			"span[id^=\"promotion_title\"]",
-		}),
+		Promotion:       extractPromotionValue(doc),
 		PromoCode: textBySelectors(doc, []string{
 			"#promoPriceBlockMessage_feature_div .promoPriceBlockMessage > div:nth-child(2) span span:nth-child(2)",
 			"#promoPriceBlockMessage_feature_div span[id^=\"promoCode\"]",
@@ -288,7 +289,9 @@ func extractLinkInspectionFields(doc *goquery.Document, item LinkInspectionItem)
 		Keep: textBySelectors(doc, []string{
 			"#NEW_1_nostos_badge",
 		}),
-		Choice: extractChoiceValue(doc),
+		Choice:         extractChoiceValue(doc),
+		FrequentReturn: extractFrequentlyReturnedValue(doc),
+		NewerModel:     extractNewerModelValue(doc),
 	}
 	return result
 }
@@ -416,6 +419,106 @@ func textBySelectors(doc *goquery.Document, selectors []string) string {
 		}
 	}
 	return ""
+}
+
+func textByContentSelectors(doc *goquery.Document, selectors []string, requiredPhrases []string, maxLen int) string {
+	for _, selector := range selectors {
+		if text := firstSelectionTextContaining(doc.Find(selector), requiredPhrases, maxLen); text != "" {
+			return text
+		}
+	}
+	return fallbackModuleTextByPhrase(doc, requiredPhrases, maxLen)
+}
+
+func firstSelectionTextContaining(selection *goquery.Selection, requiredPhrases []string, maxLen int) string {
+	best := ""
+	selection.Each(func(_ int, s *goquery.Selection) {
+		text := moduleTextWithoutScripts(s)
+		if text == "" || !containsAllPhrases(text, requiredPhrases) {
+			return
+		}
+		if maxLen > 0 && len(text) > maxLen {
+			return
+		}
+		if best == "" || len(text) < len(best) {
+			best = text
+		}
+	})
+	return best
+}
+
+func fallbackModuleTextByPhrase(doc *goquery.Document, requiredPhrases []string, maxLen int) string {
+	best := ""
+	bestWithDetails := ""
+	doc.Find("div, section, aside, table, tr, td, li").Each(func(_ int, s *goquery.Selection) {
+		text := moduleTextWithoutScripts(s)
+		if text == "" || !containsAllPhrases(text, requiredPhrases) {
+			return
+		}
+		if maxLen > 0 && len(text) > maxLen {
+			return
+		}
+		if moduleHasDetails(s, text) {
+			if bestWithDetails == "" || len(text) < len(bestWithDetails) {
+				bestWithDetails = text
+			}
+			return
+		}
+		if best == "" || len(text) < len(best) {
+			best = text
+		}
+	})
+	if bestWithDetails != "" {
+		return bestWithDetails
+	}
+	return best
+}
+
+func moduleHasDetails(selection *goquery.Selection, text string) bool {
+	lower := strings.ToLower(text)
+	return selection.Find("a").Length() > 0 ||
+		strings.Contains(text, "$") ||
+		strings.Contains(lower, "left in stock") ||
+		strings.Contains(lower, "customer reviews")
+}
+
+func moduleTextWithoutScripts(selection *goquery.Selection) string {
+	clone := selection.Clone()
+	clone.Find("script, style").Remove()
+	parts := make([]string, 0)
+	collectTextParts(clone, &parts)
+	return cleanText(strings.Join(parts, " "))
+}
+
+func collectTextParts(selection *goquery.Selection, parts *[]string) {
+	selection.Contents().Each(func(_ int, child *goquery.Selection) {
+		node := child.Get(0)
+		if node == nil {
+			return
+		}
+		switch node.Type {
+		case html.TextNode:
+			text := strings.TrimSpace(node.Data)
+			if text != "" {
+				*parts = append(*parts, text)
+			}
+		case html.ElementNode:
+			if node.Data == "script" || node.Data == "style" {
+				return
+			}
+			collectTextParts(child, parts)
+		}
+	})
+}
+
+func containsAllPhrases(text string, phrases []string) bool {
+	lower := strings.ToLower(text)
+	for _, phrase := range phrases {
+		if !strings.Contains(lower, strings.ToLower(phrase)) {
+			return false
+		}
+	}
+	return true
 }
 
 func attrBySelectors(doc *goquery.Document, selectors []string, attrName string) string {
@@ -602,6 +705,112 @@ func extractPromoCheckValue(doc *goquery.Document) string {
 	return text
 }
 
+func extractPromotionValue(doc *goquery.Document) string {
+	if text := textBySelectors(doc, []string{
+		"#promoPriceBlockMessage_feature_div .promoPriceBlockMessage > div:nth-child(2) label",
+		"label[id^=\"greenBadge\"]",
+		"span[id^=\"promotion_title\"]",
+	}); text != "" {
+		return text
+	}
+
+	selectors := []string{
+		"#promoPriceBlockMessage_feature_div .promoPriceBlockMessage",
+		"#promoPriceBlockMessage_feature_div",
+		"[id*=\"brandPromotion\"]",
+		"[id*=\"brand-promotion\"]",
+		"[cel_widget_id*=\"brandPromotion\"]",
+		"[data-feature-name*=\"brandPromotion\"]",
+	}
+	for _, selector := range selectors {
+		if text := firstPromotionTextFromSelection(doc.Find(selector)); text != "" {
+			return text
+		}
+	}
+	if hasSponsoredBrandPromotion(doc) && extractCouponValue(doc) == "" && !hasOrdinaryPromotionMarker(doc) {
+		return "Brand Promotion"
+	}
+	return ""
+}
+
+func firstPromotionTextFromSelection(selection *goquery.Selection) string {
+	var promotion string
+	selection.EachWithBreak(func(_ int, s *goquery.Selection) bool {
+		text := selectionTextWithoutScripts(s)
+		if text == "" {
+			return true
+		}
+		promotion = normalizePromotionText(text)
+		return promotion == ""
+	})
+	return promotion
+}
+
+func normalizePromotionText(text string) string {
+	text = cleanText(text)
+	lower := strings.ToLower(text)
+	if lower == "" {
+		return ""
+	}
+	if strings.Contains(lower, "brand promotion") {
+		return "Brand Promotion"
+	}
+	if strings.Contains(lower, "coupon") || strings.Contains(lower, "subscribe & save") {
+		return ""
+	}
+	if strings.Contains(lower, "save") || strings.Contains(lower, "promotion") {
+		return text
+	}
+	return ""
+}
+
+func hasOrdinaryPromotionMarker(doc *goquery.Document) bool {
+	return doc.Find("[data-csa-c-item-id*=\"amzn1.promotion\"], label[id^=\"greenBadge\"], span[id^=\"promotion_title\"]").Length() > 0
+}
+
+func hasSponsoredBrandPromotion(doc *goquery.Document) bool {
+	selectors := []string{
+		"[data-slot=\"desktop-arbies\"]",
+		".sbx-desktop",
+		"[data-csa-c-owner=\"sponsored-brands-video\"]",
+		"[data-card-metrics-id*=\"multi-brand\"]",
+		"[class*=\"multi-brand\"]",
+	}
+	for _, selector := range selectors {
+		if selectionHasSponsoredBrandSignal(doc.Find(selector)) {
+			return true
+		}
+	}
+	return false
+}
+
+func selectionHasSponsoredBrandSignal(selection *goquery.Selection) bool {
+	found := false
+	selection.EachWithBreak(func(_ int, s *goquery.Selection) bool {
+		text := strings.ToLower(selectionTextWithoutScripts(s))
+		attrs := strings.ToLower(selectionAttributes(s))
+		haystack := text + " " + attrs
+		found = strings.Contains(haystack, "brand in this category on amazon") ||
+			strings.Contains(haystack, "sponsored ad from") ||
+			strings.Contains(haystack, "sponsored-brands") ||
+			strings.Contains(haystack, "desktop-arbies")
+		return !found
+	})
+	return found
+}
+
+func selectionAttributes(selection *goquery.Selection) string {
+	node := selection.Get(0)
+	if node == nil {
+		return ""
+	}
+	parts := make([]string, 0, len(node.Attr))
+	for _, attr := range node.Attr {
+		parts = append(parts, attr.Key, attr.Val)
+	}
+	return strings.Join(parts, " ")
+}
+
 func extractChoiceValue(doc *goquery.Document) string {
 	text := textBySelectors(doc, []string{
 		"#acBadge_feature_div > div > span > span > span",
@@ -619,6 +828,36 @@ func extractChoiceValue(doc *goquery.Document) string {
 		return "Amazon's  Choice"
 	}
 	return ""
+}
+
+func extractFrequentlyReturnedValue(doc *goquery.Document) string {
+	selectors := []string{
+		"#product-alert-grid_feature_div .a-alert-content",
+		"#product-alert-grid_feature_div",
+		"[id*=\"product-alert\"] .a-alert-content",
+		"[id*=\"product-alert\"]",
+		"[data-feature-name=\"product-alert-grid\"]",
+		"[cel_widget_id*=\"product-alert-grid\"]",
+	}
+	if text := textByContentSelectors(doc, selectors, []string{"frequently returned item", "customer reviews"}, 800); text != "" {
+		return text
+	}
+	return textByContentSelectors(doc, selectors, []string{"frequently returned item"}, 800)
+}
+
+func extractNewerModelValue(doc *goquery.Document) string {
+	selectors := []string{
+		"#newerVersion_feature_div",
+		"#newer-version",
+		"#newerVersion",
+		"[id*=\"newerVersion\"]",
+		"[id*=\"newer-version\"]",
+		"[cel_widget_id*=\"newerVersion\"]",
+	}
+	if text := textByContentSelectors(doc, selectors, []string{"newer model of this item"}, 1600); text != "" {
+		return text
+	}
+	return textByContentSelectors(doc, selectors, []string{"newer version of this item"}, 1600)
 }
 
 func extractReviewCountValue(text string) int {
@@ -675,6 +914,8 @@ func inspectionRows(results []LinkInspectionResult) [][]string {
 			r.PromoCode,
 			r.Keep,
 			r.Choice,
+			r.FrequentReturn,
+			r.NewerModel,
 		})
 	}
 	return rows
@@ -741,7 +982,7 @@ func worksheetXML(rows [][]string) string {
 	builder.WriteString(`<sheetViews><sheetView workbookViewId="0"/></sheetViews>`)
 	builder.WriteString(`<sheetFormatPr defaultRowHeight="15"/>`)
 	builder.WriteString(`<cols>`)
-	widths := []float64{55, 36, 14, 12, 12, 12, 12, 12, 10, 12, 18, 18, 18, 55, 18}
+	widths := []float64{55, 36, 14, 12, 12, 12, 12, 12, 10, 12, 18, 18, 18, 55, 18, 32, 70}
 	for i, width := range widths {
 		builder.WriteString(fmt.Sprintf(`<col min="%d" max="%d" width="%.2f" customWidth="1"/>`, i+1, i+1, width))
 	}

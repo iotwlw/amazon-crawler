@@ -58,6 +58,18 @@ func TestExtractLinkInspectionFields(t *testing.T) {
   <span id="primeExclusivePricingMessage"><span class="a-size-base">$49.99</span></span>
   <div id="NEW_1_nostos_badge">Customers usually keep this item.</div>
   <div id="acBadge_feature_div"><div><span><span><span>    Amazon's  Choice   </span></span></span></div><span>Overall Pick</span></div>
+  <div id="product-alert-grid_feature_div">
+    <div class="a-alert-content">
+      <span>Frequently returned item</span>
+      <span>Check the product details and customer reviews to learn more about this item.</span>
+    </div>
+  </div>
+  <div id="newerVersion_feature_div">
+    <h1>There is a newer model of this item:</h1>
+    <a>Lightdot 320W LED Parking Lot Light 80000Lumens 5000K LED Pole Lights Outdoor</a>
+    <span>$369.99</span>
+    <span>Only 10 left in stock - order soon.</span>
+  </div>
 </body>
 </html>`
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
@@ -89,6 +101,8 @@ func TestExtractLinkInspectionFields(t *testing.T) {
 	assertEqual(t, "promo check", result.PromoCheck, "")
 	assertEqual(t, "keep", result.Keep, "Customers usually keep this item.")
 	assertEqual(t, "choice", result.Choice, "Amazon's  Choice")
+	assertEqual(t, "frequently returned", result.FrequentReturn, "Frequently returned item Check the product details and customer reviews to learn more about this item.")
+	assertEqual(t, "newer model", result.NewerModel, "There is a newer model of this item: Lightdot 320W LED Parking Lot Light 80000Lumens 5000K LED Pole Lights Outdoor $369.99 Only 10 left in stock - order soon.")
 }
 
 func TestExtractPriceStatusValue(t *testing.T) {
@@ -169,6 +183,92 @@ func TestChoiceFallsBackToContainerButNormalizes(t *testing.T) {
 	assertEqual(t, "choice", extractChoiceValue(doc), "Amazon's  Choice")
 }
 
+func TestExtractPromotionValueSupportsBrandPromotion(t *testing.T) {
+	html := `<html><body>
+  <div id="promoPriceBlockMessage_feature_div">
+    <span class="promoPriceBlockMessage">
+      <div><span><span class="a-size-base a-color-success">Brand Promotion</span></span></div>
+    </span>
+  </div>
+</body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertEqual(t, "brand promotion", extractPromotionValue(doc), "Brand Promotion")
+}
+
+func TestExtractPromotionValueIgnoresCouponOnly(t *testing.T) {
+	html := `<html><body>
+  <div id="promoPriceBlockMessage_feature_div">
+    <span class="promoPriceBlockMessage">
+      <div><span><label>Apply 10% coupon</label><a>Shop items</a><a>Terms</a></span></div>
+    </span>
+  </div>
+</body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertEqual(t, "coupon-only promotion", extractPromotionValue(doc), "")
+}
+
+func TestExtractPromotionValueFallsBackToSponsoredBrand(t *testing.T) {
+	html := `<html><body>
+  <div class="sbx-desktop" data-slot="desktop-arbies">
+    <h2>Brand in this category on Amazon</h2>
+    <a aria-label="Sponsored ad from Lighting Your Business Future. Shop Lighting Your Business Future."></a>
+  </div>
+</body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertEqual(t, "sponsored brand promotion", extractPromotionValue(doc), "Brand Promotion")
+}
+
+func TestExtractPromotionValueDoesNotUseSponsoredBrandWhenCouponExists(t *testing.T) {
+	html := `<html><body>
+  <div id="promoPriceBlockMessage_feature_div">
+    <span class="promoPriceBlockMessage">
+      <span id="couponTextpctch123" class="couponLabelText">Apply 10% coupon</span>
+    </span>
+  </div>
+  <div class="sbx-desktop" data-slot="desktop-arbies">
+    <h2>Brand in this category on Amazon</h2>
+  </div>
+</body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertEqual(t, "sponsored brand with coupon", extractPromotionValue(doc), "")
+}
+
+func TestExtractFrequentlyReturnedValueFallsBackByText(t *testing.T) {
+	html := `<html><body><div class="a-alert"><span>Frequently returned item</span><span>Check the product details and customer reviews to learn more about this item.</span></div></body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertEqual(t, "frequently returned", extractFrequentlyReturnedValue(doc), "Frequently returned item Check the product details and customer reviews to learn more about this item.")
+}
+
+func TestExtractNewerModelValueFallsBackByText(t *testing.T) {
+	html := `<html><body><div class="a-box"><div>There is a newer model of this item:</div><a>Replacement product title</a><span>$12.34</span></div></body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertEqual(t, "newer model", extractNewerModelValue(doc), "There is a newer model of this item: Replacement product title $12.34")
+}
+
 func TestCalculateDisplayDiscountFromListPriceAndPrice(t *testing.T) {
 	assertEqual(t, "discount", calculateDisplayDiscount("List Price: $269.99", "$242.99"), "-10%")
 	assertEqual(t, "discount missing list price", calculateDisplayDiscount("", "$242.99"), "")
@@ -209,12 +309,12 @@ func TestWriteInspectionXLSX(t *testing.T) {
 	if containsString(inspectionHeaders, "价格状态") {
 		t.Fatal("价格状态 column should not be present")
 	}
-	if inspectionHeaders[len(inspectionHeaders)-1] != "Choice" {
-		t.Fatalf("last header = %q, want Choice", inspectionHeaders[len(inspectionHeaders)-1])
+	if inspectionHeaders[len(inspectionHeaders)-1] != "Newer model" {
+		t.Fatalf("last header = %q, want Newer model", inspectionHeaders[len(inspectionHeaders)-1])
 	}
 	rows := [][]string{
 		inspectionHeaders,
-		{"Product", "https://www.amazon.com/dp/B0FNMPQSJC", "B0FNMPQSJC", "$199.99", "10%", " ", " ", "-32%", "4.3", "7", "", "", "", "", "Amazon's Choice"},
+		{"Product", "https://www.amazon.com/dp/B0FNMPQSJC", "B0FNMPQSJC", "$199.99", "10%", " ", " ", "-32%", "4.3", "7", "", "", "", "", "Amazon's Choice", "Frequently returned item", "There is a newer model of this item: Product"},
 	}
 	if err := writeInspectionXLSX(out, rows); err != nil {
 		t.Fatal(err)
