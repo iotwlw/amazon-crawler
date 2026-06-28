@@ -75,6 +75,7 @@ type Mysql struct {
 type flagStruct struct {
 	config_file string
 	serve       string // HTTP 服务模式，值为监听地址如 ":8080"
+	serveOnly   bool   // HTTP API-only 模式，不启动关键词任务消费者
 	asin        string // ASIN 列表，逗号分隔
 	domain      string // 指定亚马逊域名（ASIN/链接巡检模式有效）
 	brand       bool   // 品牌巡查模式
@@ -200,6 +201,7 @@ func init_flag() flagStruct {
 	var f flagStruct
 	flag.StringVar(&f.config_file, "c", "config.yaml", "打开配置文件")
 	flag.StringVar(&f.serve, "serve", "", "启动 HTTP 服务模式，指定监听地址如 :8080")
+	flag.BoolVar(&f.serveOnly, "serve-only", false, "HTTP 服务仅启动 API，不启动关键词任务消费者（适合 LingxingAPI 集成）")
 	flag.StringVar(&f.asin, "asin", "", "ASIN 列表，逗号分隔（如：B08N5WRWNW,B07XYZ）")
 	flag.StringVar(&f.domain, "domain", "", "亚马逊域名（ASIN/链接巡检模式有效；ASIN 模式默认 www.amazon.com.mx）")
 	flag.BoolVar(&f.brand, "brand", false, "启动品牌巡查模式")
@@ -278,9 +280,13 @@ func main() {
 		// HTTP 服务模式
 		log.Infof("启动 HTTP 服务模式")
 
-		// 初始化并启动任务消费者
-		InitTaskWorker()
-		taskWorker.Start()
+		if f.serveOnly {
+			log.Infof("HTTP 服务仅启动 API，跳过关键词任务消费者")
+		} else {
+			// 初始化并启动任务消费者
+			InitTaskWorker()
+			taskWorker.Start()
+		}
 
 		// 启动 HTTP 服务（阻塞）
 		StartHTTPServer(f.serve)

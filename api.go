@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
+	"time"
 
 	log "github.com/tengfei-xy/go-log"
 )
@@ -34,18 +37,69 @@ type CrawlResponseData struct {
 	Skipped  int `json:"skipped"`  // 跳过的数量（已存在）
 }
 
+type ASINInspectionOptions struct {
+	IncludeOffer  bool `json:"include_offer"`
+	IncludeSeller bool `json:"include_seller"`
+}
+
+type ASINInspectionRequestItem struct {
+	ASIN     string `json:"asin"`
+	URL      string `json:"url"`
+	Original string `json:"original"`
+}
+
+type ASINInspectionRequest struct {
+	JobID   string                      `json:"job_id"`
+	Domain  string                      `json:"domain"`
+	Items   []ASINInspectionRequestItem `json:"items"`
+	Options ASINInspectionOptions       `json:"options"`
+}
+
+type ASINInspectionResponseData struct {
+	JobID string                       `json:"job_id,omitempty"`
+	Items []ASINInspectionResponseItem `json:"items"`
+}
+
+type ASINInspectionResponseItem struct {
+	Input           string `json:"input"`
+	URL             string `json:"url"`
+	Domain          string `json:"domain"`
+	OriginalASIN    string `json:"original_asin"`
+	ASIN            string `json:"asin"`
+	Status          string `json:"status"`
+	ProductTitle    string `json:"product_title"`
+	Price           string `json:"price"`
+	Coupon          string `json:"coupon"`
+	IsDeal          string `json:"is_deal"`
+	PrimeExclusive  string `json:"prime_exclusive"`
+	DisplayDiscount string `json:"display_discount"`
+	Rating          string `json:"rating"`
+	ReviewCount     int    `json:"review_count"`
+	PromoCheck      string `json:"promo_check"`
+	Promotion       string `json:"promotion"`
+	PromoCode       string `json:"promo_code"`
+	Keep            string `json:"keep"`
+	ChoiceBadge     string `json:"choice_badge"`
+	FrequentReturn  string `json:"frequent_return"`
+	NewerModel      string `json:"newer_model"`
+	ErrorMessage    string `json:"error_message"`
+	CapturedAt      string `json:"captured_at"`
+}
+
 // StartHTTPServer 启动 HTTP 服务
 func StartHTTPServer(addr string) {
 	mux := http.NewServeMux()
 
 	// 注册路由
 	mux.HandleFunc("/api/crawl", handleCrawl)
+	mux.HandleFunc("/api/asin-inspection", handleASINInspection)
 	mux.HandleFunc("/api/status", handleStatus)
 	mux.HandleFunc("/health", handleHealth)
 
 	log.Infof("HTTP 服务启动在 %s", addr)
 	log.Infof("可用接口:")
 	log.Infof("  POST /api/crawl  - 提交爬取任务")
+	log.Infof("  POST /api/asin-inspection - ASIN/链接实时巡检")
 	log.Infof("  GET  /api/status - 查看任务状态")
 	log.Infof("  GET  /health     - 健康检查")
 
@@ -123,6 +177,157 @@ func handleCrawl(w http.ResponseWriter, r *http.Request) {
 			Skipped:  skipped,
 		},
 	})
+}
+
+func handleASINInspection(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if !checkCrawlerToken(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, APIResponse{
+			Code:    -1,
+			Message: "只支持 POST 方法",
+		})
+		return
+	}
+
+	var req ASINInspectionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, APIResponse{
+			Code:    -1,
+			Message: fmt.Sprintf("请求解析失败: %v", err),
+		})
+		return
+	}
+
+	items, err := buildASINInspectionItems(req)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, APIResponse{
+			Code:    -1,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	if _, err := app.get_cookie(); err != nil {
+		log.Warnf("获取 Cookie 失败: %v，将不使用 Cookie", err)
+	}
+
+	domain := normalizeDomain(req.Domain)
+	if domain == "" {
+		domain = normalizeDomain(app.Domain)
+	}
+	inspector := NewLinkInspector("", domain, "")
+	responseItems := make([]ASINInspectionResponseItem, 0, len(items))
+	for i, item := range items {
+		log.Infof("ASIN巡检: %d/%d %s", i+1, len(items), item.Original)
+		result := inspector.inspectItem(item)
+		responseItems = append(responseItems, linkInspectionResultToAPIItem(result, time.Now().UTC().Format(time.RFC3339)))
+	}
+
+	writeJSON(w, http.StatusOK, APIResponse{
+		Code:    0,
+		Message: "ok",
+		Data: ASINInspectionResponseData{
+			JobID: req.JobID,
+			Items: responseItems,
+		},
+	})
+}
+
+func checkCrawlerToken(w http.ResponseWriter, r *http.Request) bool {
+	token := strings.TrimSpace(os.Getenv("CRAWLER_API_TOKEN"))
+	if token == "" {
+		return true
+	}
+	if r.Header.Get("X-Crawler-Token") == token {
+		return true
+	}
+	writeJSON(w, http.StatusUnauthorized, APIResponse{
+		Code:    -1,
+		Message: "无效的 X-Crawler-Token",
+	})
+	return false
+}
+
+func buildASINInspectionItems(req ASINInspectionRequest) ([]LinkInspectionItem, error) {
+	if len(req.Items) == 0 {
+		return nil, fmt.Errorf("items 不能为空")
+	}
+	if len(req.Items) > 50 {
+		return nil, fmt.Errorf("items 不能超过 50 条")
+	}
+
+	defaultDomain := normalizeDomain(req.Domain)
+	if defaultDomain == "" {
+		defaultDomain = normalizeDomain(app.Domain)
+	}
+	if defaultDomain == "" {
+		defaultDomain = "www.amazon.com"
+	}
+
+	items := make([]LinkInspectionItem, 0, len(req.Items))
+	seen := make(map[string]struct{})
+	for i, rawItem := range req.Items {
+		raw := strings.TrimSpace(rawItem.URL)
+		if raw == "" {
+			raw = strings.TrimSpace(rawItem.ASIN)
+		}
+		if raw == "" {
+			raw = strings.TrimSpace(rawItem.Original)
+		}
+		if raw == "" {
+			return nil, fmt.Errorf("items[%d] 缺少 asin 或 url", i)
+		}
+
+		item, ok := parseLinkInspectionItem(raw, defaultDomain)
+		if !ok {
+			return nil, fmt.Errorf("items[%d] 无法识别 ASIN 或商品链接: %s", i, raw)
+		}
+		if _, exists := seen[item.URL]; exists {
+			continue
+		}
+		seen[item.URL] = struct{}{}
+		items = append(items, item)
+	}
+	if len(items) == 0 {
+		return nil, fmt.Errorf("items 没有可巡检的 ASIN 或商品链接")
+	}
+	return items, nil
+}
+
+func linkInspectionResultToAPIItem(result LinkInspectionResult, capturedAt string) ASINInspectionResponseItem {
+	status := "success"
+	if result.ErrorMessage != "" {
+		status = "failed"
+	}
+	return ASINInspectionResponseItem{
+		Input:           result.Item.Original,
+		URL:             result.Item.URL,
+		Domain:          result.Item.Domain,
+		OriginalASIN:    result.Item.ASIN,
+		ASIN:            result.ASIN,
+		Status:          status,
+		ProductTitle:    result.Product,
+		Price:           result.Price,
+		Coupon:          result.Coupon,
+		IsDeal:          result.IsDeal,
+		PrimeExclusive:  result.PrimeExclusive,
+		DisplayDiscount: result.DisplayDiscount,
+		Rating:          result.Rating,
+		ReviewCount:     result.ReviewCount,
+		PromoCheck:      result.PromoCheck,
+		Promotion:       result.Promotion,
+		PromoCode:       result.PromoCode,
+		Keep:            result.Keep,
+		ChoiceBadge:     result.Choice,
+		FrequentReturn:  result.FrequentReturn,
+		NewerModel:      result.NewerModel,
+		ErrorMessage:    result.ErrorMessage,
+		CapturedAt:      capturedAt,
+	}
 }
 
 // insertKeywordTask 将关键词插入到 amc_category 表

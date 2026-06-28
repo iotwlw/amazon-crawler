@@ -105,6 +105,40 @@ func TestExtractLinkInspectionFields(t *testing.T) {
 	assertEqual(t, "newer model", result.NewerModel, "There is a newer model of this item: Lightdot 320W LED Parking Lot Light 80000Lumens 5000K LED Pole Lights Outdoor $369.99 Only 10 left in stock - order soon.")
 }
 
+func TestVariantMergedASINMarksPriceAndOriginalASIN(t *testing.T) {
+	html := `
+<html>
+<head>
+  <link rel="canonical" href="https://www.amazon.com/Lightdot-100-277v-Photocell-Exterior-Lighting/dp/B0DKF7HNZX"/>
+</head>
+<body>
+  <input id="ASIN" value="B0DKF7HNZX"/>
+  <span id="productTitle"> Lightdot 2 Pack 150W Wall Pack LED Exterior Light </span>
+  <div id="corePrice_feature_div"><span class="a-offscreen">$95.99</span></div>
+</body>
+</html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	item := LinkInspectionItem{
+		Original: "https://www.amazon.com/dp/B0B6FZ1R2L",
+		URL:      "https://www.amazon.com/dp/B0B6FZ1R2L",
+		ASIN:     "B0B6FZ1R2L",
+		Domain:   "www.amazon.com",
+	}
+	result := extractLinkInspectionFields(doc, item)
+
+	assertEqual(t, "actual asin", result.ASIN, "B0DKF7HNZX")
+	assertEqual(t, "price", result.Price, "不可售-变体")
+
+	rows := inspectionRows([]LinkInspectionResult{result})
+	assertEqual(t, "original asin column", rows[1][1], "B0B6FZ1R2L")
+	assertEqual(t, "actual asin column", rows[1][2], "B0DKF7HNZX")
+	assertEqual(t, "price column", rows[1][3], "不可售-变体")
+}
+
 func TestExtractPriceStatusValue(t *testing.T) {
 	cases := []struct {
 		name string

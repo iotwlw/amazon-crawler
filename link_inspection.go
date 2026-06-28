@@ -22,13 +22,14 @@ import (
 )
 
 var (
-	linkASINRe        = regexp.MustCompile(`(?i)/(?:dp|gp/product)/([A-Z0-9]{10})`)
-	bareASINRe        = regexp.MustCompile(`(?i)(^|[^A-Z0-9])([A-Z0-9]{10})([^A-Z0-9]|$)`)
-	promoAmountRe     = regexp.MustCompile(`(?i)(\d{1,3}%|\$\d+(?:\.\d+)?)`)
-	moneyAmountRe     = regexp.MustCompile(`\$?\s*([0-9][0-9,]*(?:\.\d{1,2})?)`)
-	firstNumberRe     = regexp.MustCompile(`\d+`)
-	decimalNumberRe   = regexp.MustCompile(`\d+(?:\.\d+)?`)
-	inspectionHeaders = []string{
+	linkASINRe         = regexp.MustCompile(`(?i)/(?:dp|gp/product)/([A-Z0-9]{10})`)
+	bareASINRe         = regexp.MustCompile(`(?i)(^|[^A-Z0-9])([A-Z0-9]{10})([^A-Z0-9]|$)`)
+	promoAmountRe      = regexp.MustCompile(`(?i)(\d{1,3}%|\$\d+(?:\.\d+)?)`)
+	moneyAmountRe      = regexp.MustCompile(`\$?\s*([0-9][0-9,]*(?:\.\d{1,2})?)`)
+	firstNumberRe      = regexp.MustCompile(`\d+`)
+	decimalNumberRe    = regexp.MustCompile(`\d+(?:\.\d+)?`)
+	variantPriceStatus = "不可售-变体"
+	inspectionHeaders  = []string{
 		"产品",
 		"原ASIN",
 		"ASIN",
@@ -250,10 +251,7 @@ func extractLinkInspectionFields(doc *goquery.Document, item LinkInspectionItem)
 		"#averageCustomerReviews .a-size-base.a-color-secondary",
 	}))
 
-	asin := cleanText(attrBySelectors(doc, []string{"input#ASIN", "input[name=\"ASIN\"]"}, "value"))
-	if asin == "" {
-		asin = item.ASIN
-	}
+	asin := extractActualASINValue(doc, item)
 
 	rating := extractRatingValue(textBySelectors(doc, []string{
 		"#averageCustomerReviews span[aria-hidden=\"true\"]",
@@ -265,7 +263,9 @@ func extractLinkInspectionFields(doc *goquery.Document, item LinkInspectionItem)
 		rating = ""
 	}
 	price := extractCurrentPriceValue(doc)
-	if strings.TrimSpace(price) == "" {
+	if isVariantASIN(item.ASIN, asin) {
+		price = variantPriceStatus
+	} else if strings.TrimSpace(price) == "" {
 		price = extractPriceStatusValue(doc)
 	}
 
@@ -294,6 +294,23 @@ func extractLinkInspectionFields(doc *goquery.Document, item LinkInspectionItem)
 		NewerModel:     extractNewerModelValue(doc),
 	}
 	return result
+}
+
+func extractActualASINValue(doc *goquery.Document, item LinkInspectionItem) string {
+	asin := cleanText(attrBySelectors(doc, []string{"input#ASIN", "input[name=\"ASIN\"]"}, "value"))
+	if asin != "" {
+		return strings.ToUpper(asin)
+	}
+	if canonicalASIN := extractASINFromString(attrBySelectors(doc, []string{"link[rel=\"canonical\"]"}, "href")); canonicalASIN != "" {
+		return canonicalASIN
+	}
+	return item.ASIN
+}
+
+func isVariantASIN(originalASIN, actualASIN string) bool {
+	originalASIN = strings.ToUpper(strings.TrimSpace(originalASIN))
+	actualASIN = strings.ToUpper(strings.TrimSpace(actualASIN))
+	return originalASIN != "" && actualASIN != "" && originalASIN != actualASIN
 }
 
 func loadLinkInspectionItems(inputFile, defaultDomain string) ([]LinkInspectionItem, error) {
@@ -900,7 +917,7 @@ func inspectionRows(results []LinkInspectionResult) [][]string {
 	for _, r := range results {
 		rows = append(rows, []string{
 			r.Product,
-			r.Item.Original,
+			r.Item.ASIN,
 			r.ASIN,
 			r.Price,
 			r.Coupon,

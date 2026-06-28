@@ -136,13 +136,26 @@ B0DWWWP4FF
 go run . -c config.yaml -serve :8080
 ```
 
+LingxingAPI 只需要调用 `/api/asin-inspection` 实时巡检接口，推荐使用 API-only 模式，避免同时启动旧的关键词任务消费者：
+
+```bash
+go run . -c config.yaml -serve 127.0.0.1:8080 -serve-only
+```
+
 ### API 接口
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | /api/crawl | 提交爬取任务 |
+| POST | /api/asin-inspection | ASIN/链接实时巡检，返回结构化 JSON |
 | GET | /api/status | 查看任务状态 |
 | GET | /health | 健康检查 |
+
+如果设置了环境变量 `CRAWLER_API_TOKEN`，调用方需要在请求头中携带：
+
+```text
+X-Crawler-Token: <token>
+```
 
 ### 提交任务
 
@@ -175,6 +188,59 @@ curl http://localhost:8080/api/status
 | 0 | pending | 待执行 |
 | 1 | completed | 已执行 |
 | 2 | failed | 失败 |
+
+### ASIN/链接实时巡检
+
+该接口复用链接巡检解析逻辑，适合被运营工作台小批量调用。
+
+请求：
+
+```bash
+curl -X POST http://localhost:8080/api/asin-inspection \
+  -H "Content-Type: application/json" \
+  -d '{"job_id":"workbench-123","domain":"www.amazon.com","items":[{"asin":"B0FNMPQSJC"},{"url":"https://www.amazon.com/dp/B0DWWWP4FF?th=1"}],"options":{"include_offer":true}}'
+```
+
+响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "job_id": "workbench-123",
+    "items": [
+      {
+        "input": "B0FNMPQSJC",
+        "url": "https://www.amazon.com/dp/B0FNMPQSJC",
+        "domain": "www.amazon.com",
+        "original_asin": "B0FNMPQSJC",
+        "asin": "B0FNMPQSJC",
+        "status": "success",
+        "product_title": "Product title",
+        "price": "$29.99",
+        "coupon": "10%",
+        "is_deal": "",
+        "prime_exclusive": "",
+        "display_discount": "-15%",
+        "rating": "4.5",
+        "review_count": 1234,
+        "choice_badge": "Amazon's Choice",
+        "frequent_return": "",
+        "newer_model": "",
+        "error_message": "",
+        "captured_at": "2026-06-06T00:00:00Z"
+      }
+    ]
+  }
+}
+```
+
+说明：
+
+- 单次最多 50 条。
+- `asin` 字段是页面实际 ASIN；如果 Amazon 合并到变体页面，`original_asin` 会保留输入 ASIN。
+- 单项失败时，该项 `status` 为 `failed`，错误写入 `error_message`，不影响其他项返回。
 
 ### 数据库表变更
 
