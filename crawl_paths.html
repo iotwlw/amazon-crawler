@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Amazon Crawler 可执行抓取路径与调用方法</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fa;
+      --panel: #ffffff;
+      --text: #1f2933;
+      --muted: #5f6c7b;
+      --line: #d8dee6;
+      --accent: #0f766e;
+      --accent-soft: #e6f4f1;
+      --code-bg: #111827;
+      --code-text: #e5e7eb;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      line-height: 1.6;
+    }
+
+    header {
+      background: #0b1f2a;
+      color: #fff;
+      padding: 32px 24px;
+    }
+
+    header h1 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    header p {
+      margin: 0;
+      max-width: 960px;
+      color: #d5dde5;
+    }
+
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    section {
+      margin: 0 0 24px;
+      padding: 22px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 22px;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 20px 0 8px;
+      font-size: 17px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 8px 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      background: #fff;
+      table-layout: fixed;
+    }
+
+    th,
+    td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+      overflow-wrap: anywhere;
+    }
+
+    th {
+      background: #eef2f6;
+      font-weight: 700;
+    }
+
+    code {
+      padding: 2px 5px;
+      background: #eef2f6;
+      border-radius: 4px;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 0.95em;
+    }
+
+    pre {
+      margin: 10px 0 16px;
+      padding: 14px 16px;
+      overflow: auto;
+      background: var(--code-bg);
+      color: var(--code-text);
+      border-radius: 8px;
+    }
+
+    pre code {
+      padding: 0;
+      background: transparent;
+      color: inherit;
+      border-radius: 0;
+      font-size: 14px;
+    }
+
+    .note {
+      padding: 10px 12px;
+      background: var(--accent-soft);
+      border-left: 4px solid var(--accent);
+      border-radius: 4px;
+      color: #164e46;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .path-title {
+      display: inline-block;
+      margin-bottom: 6px;
+      padding: 3px 8px;
+      background: var(--accent-soft);
+      color: #0f5f58;
+      border-radius: 4px;
+      font-weight: 700;
+    }
+
+    ul {
+      margin: 8px 0 0 20px;
+      padding: 0;
+    }
+
+    li {
+      margin: 4px 0;
+    }
+
+    @media (max-width: 760px) {
+      header,
+      main {
+        padding-left: 16px;
+        padding-right: 16px;
+      }
+
+      section {
+        padding: 16px;
+      }
+
+      table {
+        display: block;
+        overflow-x: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Amazon Crawler 可执行抓取路径与调用方法</h1>
+    <p>整理自当前代码入口，覆盖命令行模式、HTTP API 模式、品牌巡查、链接巡检、ASIN 评论统计和评价抓取。更新时间：2026-07-03。</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>公共前置条件</h2>
+      <p>所有模式都从项目根目录执行，并先经过 <code>main.go</code> 中的配置、robots、MySQL、网络和信号初始化流程。</p>
+      <ul>
+        <li>配置文件默认是 <code>config.yaml</code>，也可以通过 <code>-c</code> 指定。</li>
+        <li>程序启动时会连接 MySQL，并从数据库读取 Cookie、任务或写入结果。</li>
+        <li><code>config.yaml</code> 的 <code>exec.enable</code> 至少需要开启一个模块，否则 <code>init_config</code> 会直接退出。</li>
+        <li>所有 Amazon 页面请求都会经过 robots.txt 检查和当前浏览器指纹请求头。</li>
+      </ul>
+
+      <h3>构建与基础运行</h3>
+      <pre><code>powershell -ExecutionPolicy Bypass -File .\scripts\init.ps1 -Build
+go run . -c config.yaml
+.\amazon-crawler.exe -c config.yaml</code></pre>
+
+      <p class="note">如果同时传入多个模式参数，实际执行优先级为：<code>-brand</code>、<code>-link-file</code>、<code>-review-url</code>、<code>-asin</code>、<code>-serve</code>、默认关键词循环。</p>
+    </section>
+
+    <section>
+      <h2>路径总览</h2>
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 15%;">可执行路径</th>
+            <th style="width: 29%;">调用方法</th>
+            <th style="width: 34%;">主入口与执行链</th>
+            <th style="width: 22%;">结果位置</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>默认关键词循环抓取</td>
+            <td><code>go run . -c config.yaml</code></td>
+            <td><code>main</code> 到 <code>searchStruct.main</code>、<code>productStruct.main</code>、<code>sellerStruct.main</code></td>
+            <td>写入项目定义的搜索、商品、卖家相关 MySQL 表</td>
+          </tr>
+          <tr>
+            <td>HTTP 关键词任务抓取</td>
+            <td>启动 <code>-serve :8080</code>，再调用 <code>POST /api/crawl</code></td>
+            <td><code>handleCrawl</code> 到 <code>TaskWorker.processPendingTasks</code> 到 <code>ExecuteCrawlWithStatus</code></td>
+            <td>写入 <code>amc_category</code> 任务状态和商品、卖家结果表</td>
+          </tr>
+          <tr>
+            <td>HTTP ASIN/链接实时巡检</td>
+            <td>启动 <code>-serve 127.0.0.1:8080 -serve-only</code>，再调用 <code>POST /api/asin-inspection</code></td>
+            <td><code>handleASINInspection</code> 到 <code>NewLinkInspector</code> 到 <code>inspectItem</code></td>
+            <td>直接返回 JSON，不落 XLSX</td>
+          </tr>
+          <tr>
+            <td>命令行链接巡检</td>
+            <td><code>-link-file</code> 指定 ASIN 或商品链接文本文件</td>
+            <td><code>NewLinkInspector(...).Run</code> 到 <code>inspectItem</code> 到 <code>writeInspectionXLSX</code></td>
+            <td>默认写入 <code>output/link_inspection_时间.xlsx</code></td>
+          </tr>
+          <tr>
+            <td>命令行评价抓取</td>
+            <td><code>-review-url</code> 指定商品链接或 ASIN</td>
+            <td><code>NewReviewScraper(...).Run</code> 到 <code>scrapeFirstPage</code> 到 <code>exportCSV</code></td>
+            <td>默认写入 <code>output/reviews_ASIN_时间.csv</code> 和图片目录</td>
+          </tr>
+          <tr>
+            <td>命令行 ASIN 评论统计</td>
+            <td><code>-asin</code> 指定逗号分隔 ASIN 列表</td>
+            <td><code>NewASINScraper(...).Run</code> 到 <code>scrapeASIN</code> 到 <code>exportCSV</code></td>
+            <td>默认写入 <code>output/asins_时间.csv</code></td>
+          </tr>
+          <tr>
+            <td>品牌巡查</td>
+            <td><code>-brand</code></td>
+            <td><code>brandMain</code> 到 <code>processBrandBatch</code> 到 <code>brandStruct.process</code></td>
+            <td>读取 <code>available_brand_domains</code>，写入 <code>tb_amazon_shop</code> 和巡查状态</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>1. 默认关键词循环抓取</h2>
+      <p><span class="path-title">适用场景</span> 从数据库 <code>amc_category</code> 读取关键词，按配置循环执行搜索、商品页解析和卖家详情抓取。</p>
+      <pre><code>go run . -c config.yaml
+.\amazon-crawler.exe -c config.yaml</code></pre>
+      <p>执行链：</p>
+      <pre><code>main
+  app.start
+  searchStruct.main
+  productStruct.main
+  sellerStruct.main</code></pre>
+      <p>配置控制项主要位于 <code>config.yaml</code> 的 <code>exec.enable</code>、<code>exec.loop</code> 和 <code>exec.search_priority</code>。</p>
+    </section>
+
+    <section>
+      <h2>2. HTTP 关键词任务抓取</h2>
+      <p><span class="path-title">适用场景</span> 外部系统提交关键词任务，服务端写入 <code>amc_category</code>，后台 Worker 消费待执行任务。</p>
+      <h3>启动服务</h3>
+      <pre><code>go run . -c config.yaml -serve :8080
+.\amazon-crawler.exe -c config.yaml -serve :8080</code></pre>
+      <h3>提交关键词任务</h3>
+      <pre><code>curl -X POST http://127.0.0.1:8080/api/crawl ^
+  -H "Content-Type: application/json" ^
+  -d "{\"keywords\":[\"nike\",\"adidas\",\"puma\"]}"</code></pre>
+      <p>执行链：</p>
+      <pre><code>POST /api/crawl
+  handleCrawl
+  insertKeywordTask
+  taskNotify
+  TaskWorker.processPendingTasks
+  ExecuteCrawlWithStatus
+  crawlSearchInMemory
+  crawlProductsFromMemory
+  fetchSellerDetails
+  batchSaveAll</code></pre>
+      <p class="note">如果启动时带 <code>-serve-only</code>，服务不会启动关键词任务消费者。此时 <code>/api/crawl</code> 仍会写入任务，但不会在当前进程里继续抓取。</p>
+    </section>
+
+    <section>
+      <h2>3. HTTP ASIN/链接实时巡检</h2>
+      <p><span class="path-title">适用场景</span> 小批量实时巡检商品链接或 ASIN，返回商品标题、价格、优惠、评分、评论数、徽标等结构化 JSON。</p>
+      <h3>启动 API-only 服务</h3>
+      <pre><code>go run . -c config.yaml -serve 127.0.0.1:8080 -serve-only</code></pre>
+      <h3>调用接口</h3>
+      <pre><code>curl -X POST http://127.0.0.1:8080/api/asin-inspection ^
+  -H "Content-Type: application/json" ^
+  -H "X-Crawler-Token: &lt;token&gt;" ^
+  -d "{\"job_id\":\"workbench-123\",\"domain\":\"www.amazon.com\",\"items\":[{\"asin\":\"B0FNMPQSJC\"},{\"url\":\"https://www.amazon.com/dp/B0DWWWP4FF?th=1\"}],\"options\":{\"include_offer\":true}}"</code></pre>
+      <p>执行链：</p>
+      <pre><code>POST /api/asin-inspection
+  handleASINInspection
+  buildASINInspectionItems
+  NewLinkInspector("", domain, "")
+  LinkInspector.inspectItem
+  linkInspectionResultToAPIItem</code></pre>
+      <ul>
+        <li>单次请求最多 50 条。</li>
+        <li>当前代码中 <code>CRAWLER_API_TOKEN</code> 校验在 <code>/api/asin-inspection</code> 执行；设置后需要传 <code>X-Crawler-Token</code>。</li>
+        <li>单项失败会在该项返回 <code>status=failed</code> 和 <code>error_message</code>，不会中断其他项。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>4. 命令行链接巡检</h2>
+      <p><span class="path-title">适用场景</span> 批量读取文本文件中的 ASIN 或 Amazon 商品链接，输出 Excel 巡检结果。</p>
+      <h3>输入文件示例</h3>
+      <pre><code>https://www.amazon.com/dp/B0FNMPQSJC
+B0DWWWP4FF</code></pre>
+      <h3>调用方法</h3>
+      <pre><code>go run . -c config.yaml -link-file .\asins.txt -domain www.amazon.com -link-output .\output\link_inspection.xlsx
+.\amazon-crawler.exe -c config.yaml -link-file .\asins.txt -domain www.amazon.com -link-output .\output\link_inspection.xlsx</code></pre>
+      <p>执行链：</p>
+      <pre><code>main
+  NewLinkInspector(linkFile, domain, linkOutput)
+  LinkInspector.Run
+  loadLinkInspectionItems
+  inspectItem
+  writeInspectionXLSX</code></pre>
+      <p>如果不指定 <code>-link-output</code>，默认输出到 <code>output/link_inspection_时间.xlsx</code>。</p>
+    </section>
+
+    <section>
+      <h2>5. 命令行评价抓取</h2>
+      <p><span class="path-title">适用场景</span> 抓取单个商品页和评价第一页中的可见评价，下载评价图片和顾客图片区图片。</p>
+      <h3>按商品链接调用</h3>
+      <pre><code>go run . -c config.yaml -review-url "https://www.amazon.com/dp/B0FNMPQSJC" -review-output .\output\reviews_B0FNMPQSJC.csv -review-image-dir .\output\reviews_B0FNMPQSJC_images</code></pre>
+      <h3>按 ASIN 调用</h3>
+      <pre><code>go run . -c config.yaml -review-url B0FNMPQSJC -domain www.amazon.com</code></pre>
+      <p>执行链：</p>
+      <pre><code>main
+  NewReviewScraper(reviewURL, reviewOutput, reviewImageDir)
+  ReviewScraper.Run
+  scrapeFirstPage
+  parseReviewItems
+  downloadReviewImages
+  exportCSV
+  downloadCustomerPhotos
+  exportCustomerPhotosCSV</code></pre>
+      <ul>
+        <li>默认 CSV：<code>output/reviews_ASIN_时间.csv</code>。</li>
+        <li>默认图片目录：与 CSV 同名并追加 <code>_images</code>。</li>
+        <li>顾客图片区清单默认是 <code>reviews_ASIN_时间_customer_photos.csv</code>。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>6. 命令行 ASIN 评论统计</h2>
+      <p><span class="path-title">适用场景</span> 批量抓取 ASIN 的评分和评论数，输出 CSV。</p>
+      <pre><code>go run . -c config.yaml -asin B0FNMPQSJC,B0DWWWP4FF -domain www.amazon.com
+.\amazon-crawler.exe -c config.yaml -asin B0FNMPQSJC,B0DWWWP4FF -domain www.amazon.com</code></pre>
+      <p>执行链：</p>
+      <pre><code>main
+  NewASINScraper(asin, domain)
+  ASINScraper.Run
+  scrapeASIN
+  extractReviewCount
+  extractRating
+  exportCSV</code></pre>
+      <p>如果 <code>-domain</code> 为空且使用 <code>-asin</code>，当前代码默认域名为 <code>www.amazon.com.mx</code>。结果默认写入 <code>output/asins_时间.csv</code>。</p>
+    </section>
+
+    <section>
+      <h2>7. 品牌巡查</h2>
+      <p><span class="path-title">适用场景</span> 从 <code>available_brand_domains</code> 读取待巡查品牌，优先使用已有 ASIN，否则搜索品牌名，再访问商品页提取卖家并保存店铺信息。</p>
+      <pre><code>go run . -c config.yaml -brand
+.\amazon-crawler.exe -c config.yaml -brand</code></pre>
+      <p>执行链：</p>
+      <pre><code>main
+  brandMain
+  processBrandBatch
+  brandStruct.process
+    processWithASIN 或 processWithSearch
+    fetchProductPage
+    fetchSellerInfo
+    saveToAmazonShop</code></pre>
+      <ul>
+        <li>读取表：<code>available_brand_domains</code>。</li>
+        <li>写入表：<code>tb_amazon_shop</code>，并更新品牌巡查状态。</li>
+        <li>配置项：<code>brand.max_asins</code>、<code>brand.batch</code>、<code>brand.loop</code>。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>辅助 HTTP 接口</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>方法</th>
+            <th>路径</th>
+            <th>用途</th>
+            <th>调用示例</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/api/status</code></td>
+            <td>统计 <code>amc_category.task_status</code> 中待执行、已完成、失败任务数量。</td>
+            <td><code>curl http://127.0.0.1:8080/api/status</code></td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/health</code></td>
+            <td>健康检查，返回 <code>{"code":0,"message":"ok"}</code>。</td>
+            <td><code>curl http://127.0.0.1:8080/health</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>常用参数速查</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>参数</th>
+            <th>说明</th>
+            <th>示例</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>-c</code></td>
+            <td>配置文件路径，默认 <code>config.yaml</code>。</td>
+            <td><code>-c config.yaml</code></td>
+          </tr>
+          <tr>
+            <td><code>-serve</code></td>
+            <td>启动 HTTP 服务，值为监听地址。</td>
+            <td><code>-serve :8080</code></td>
+          </tr>
+          <tr>
+            <td><code>-serve-only</code></td>
+            <td>只启动 API，不启动关键词任务消费者。</td>
+            <td><code>-serve 127.0.0.1:8080 -serve-only</code></td>
+          </tr>
+          <tr>
+            <td><code>-domain</code></td>
+            <td>指定 Amazon 域名，链接巡检、ASIN 模式和评价抓取常用。</td>
+            <td><code>-domain www.amazon.com</code></td>
+          </tr>
+          <tr>
+            <td><code>-brand</code></td>
+            <td>启动品牌巡查模式。</td>
+            <td><code>-brand</code></td>
+          </tr>
+          <tr>
+            <td><code>-link-file</code></td>
+            <td>启动链接巡检模式，读取一行一个 ASIN 或商品链接的文本文件。</td>
+            <td><code>-link-file .\asins.txt</code></td>
+          </tr>
+          <tr>
+            <td><code>-link-output</code></td>
+            <td>链接巡检 XLSX 输出路径。</td>
+            <td><code>-link-output .\output\link_inspection.xlsx</code></td>
+          </tr>
+          <tr>
+            <td><code>-review-url</code></td>
+            <td>启动评价抓取模式，传 Amazon 商品链接或 ASIN。</td>
+            <td><code>-review-url B0FNMPQSJC</code></td>
+          </tr>
+          <tr>
+            <td><code>-review-output</code></td>
+            <td>评价抓取 CSV 输出路径。</td>
+            <td><code>-review-output .\output\reviews.csv</code></td>
+          </tr>
+          <tr>
+            <td><code>-review-image-dir</code></td>
+            <td>评价图片下载目录。</td>
+            <td><code>-review-image-dir .\output\review_images</code></td>
+          </tr>
+          <tr>
+            <td><code>-asin</code></td>
+            <td>启动 ASIN 评论统计模式，多个 ASIN 用英文逗号分隔。</td>
+            <td><code>-asin B0FNMPQSJC,B0DWWWP4FF</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>
