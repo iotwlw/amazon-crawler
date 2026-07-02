@@ -73,14 +73,17 @@ type Mysql struct {
 	Database string `yaml:"database"`
 }
 type flagStruct struct {
-	config_file string
-	serve       string // HTTP 服务模式，值为监听地址如 ":8080"
-	serveOnly   bool   // HTTP API-only 模式，不启动关键词任务消费者
-	asin        string // ASIN 列表，逗号分隔
-	domain      string // 指定亚马逊域名（ASIN/链接巡检模式有效）
-	brand       bool   // 品牌巡查模式
-	linkFile    string // 链接巡检输入文件
-	linkOutput  string // 链接巡检输出 xlsx 文件
+	config_file    string
+	serve          string // HTTP 服务模式，值为监听地址如 ":8080"
+	serveOnly      bool   // HTTP API-only 模式，不启动关键词任务消费者
+	asin           string // ASIN 列表，逗号分隔
+	domain         string // 指定亚马逊域名（ASIN/链接巡检模式有效）
+	brand          bool   // 品牌巡查模式
+	linkFile       string // 链接巡检输入文件
+	linkOutput     string // 链接巡检输出 xlsx 文件
+	reviewURL      string // 评论抓取商品链接
+	reviewOutput   string // 评论抓取 CSV 输出文件
+	reviewImageDir string // 评论图片下载目录
 }
 
 var app appConfig
@@ -207,6 +210,9 @@ func init_flag() flagStruct {
 	flag.BoolVar(&f.brand, "brand", false, "启动品牌巡查模式")
 	flag.StringVar(&f.linkFile, "link-file", "", "启动链接巡检模式，指定 ASIN/商品链接列表文本文件")
 	flag.StringVar(&f.linkOutput, "link-output", "", "链接巡检 xlsx 输出文件（默认 output/link_inspection_时间.xlsx）")
+	flag.StringVar(&f.reviewURL, "review-url", "", "启动评价抓取模式，指定 Amazon 商品链接或 ASIN")
+	flag.StringVar(&f.reviewOutput, "review-output", "", "评价抓取 CSV 输出文件（默认 output/reviews_ASIN_时间.csv）")
+	flag.StringVar(&f.reviewImageDir, "review-image-dir", "", "评价图片下载目录（默认与 CSV 同名加 _images）")
 	flag.Parse()
 	return f
 }
@@ -229,6 +235,16 @@ func prepareModeDomain(f flagStruct) flagStruct {
 			}
 		}
 		app.Domain = f.domain
+	}
+	if f.reviewURL != "" {
+		if item, ok := parseLinkInspectionItem(f.reviewURL, f.domain); ok {
+			if f.domain == "" {
+				f.domain = item.Domain
+			}
+			app.Domain = f.domain
+		} else if f.domain != "" {
+			app.Domain = f.domain
+		}
 	}
 	return f
 }
@@ -264,6 +280,15 @@ func main() {
 		inspector := NewLinkInspector(f.linkFile, f.domain, f.linkOutput)
 		if err := inspector.Run(); err != nil {
 			log.Errorf("链接巡检执行失败: %v", err)
+			os.Exit(1)
+		}
+		return
+	} else if f.reviewURL != "" {
+		// 评价抓取模式
+		log.Infof("启动评价抓取模式")
+		scraper := NewReviewScraper(f.reviewURL, f.reviewOutput, f.reviewImageDir)
+		if err := scraper.Run(); err != nil {
+			log.Errorf("评价抓取执行失败: %v", err)
 			os.Exit(1)
 		}
 		return
