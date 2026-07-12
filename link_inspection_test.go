@@ -207,6 +207,293 @@ func TestPriceStatusBackfillsOnlyMissingPrice(t *testing.T) {
 	}
 }
 
+func TestExtractInspectionContractStatuses(t *testing.T) {
+	item := LinkInspectionItem{
+		Original: "https://www.amazon.com/dp/B0FNMPQSJC",
+		URL:      "https://www.amazon.com/dp/B0FNMPQSJC",
+		ASIN:     "B0FNMPQSJC",
+		Domain:   "www.amazon.com",
+	}
+	cases := []struct {
+		name             string
+		html             string
+		wantPrice        string
+		wantAvailability string
+		wantOffer        string
+	}{
+		{
+			name:             "unavailable",
+			html:             `<html><body><div id="availability"><span>Currently unavailable.</span><span>We don't know when or if this item will be back in stock.</span></div></body></html>`,
+			wantPrice:        "不可售",
+			wantAvailability: availabilityStatusUnavailable,
+			wantOffer:        featuredOfferStatusUnknown,
+		},
+		{
+			name:             "used only",
+			html:             `<html><body><div id="usedBuyBox"><span>No featured offers available</span><span>Buy used: $305.01</span><span>Used: Like New</span><span>Sold by Amazon Resale</span></div></body></html>`,
+			wantPrice:        "二手跟卖",
+			wantAvailability: availabilityStatusAvailable,
+			wantOffer:        featuredOfferStatusUsedOnly,
+		},
+		{
+			name: "featured offer present",
+			html: `<html><body>
+			  <div id="corePrice_feature_div"><span class="a-offscreen">$199.99</span></div>
+			  <div id="desktop_buybox">
+			    <div id="availability">In Stock</div>
+			    <div id="merchant-info">Ships from Amazon.com Sold by <a id="sellerProfileTriggerId" href="/sp?seller=A1LIGHTDOT">Lightdot</a></div>
+			    <input id="add-to-cart-button" name="submit.add-to-cart"/>
+			  </div>
+			</body></html>`,
+			wantPrice:        "$199.99",
+			wantAvailability: availabilityStatusAvailable,
+			wantOffer:        featuredOfferStatusPresent,
+		},
+		{
+			name:             "unknown page",
+			html:             `<html><body><span id="productTitle">Product without commerce modules</span></body></html>`,
+			wantPrice:        "",
+			wantAvailability: availabilityStatusUnknown,
+			wantOffer:        featuredOfferStatusUnknown,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(tc.html))
+			if err != nil {
+				t.Fatal(err)
+			}
+			result := extractLinkInspectionFields(doc, item)
+			assertEqual(t, "legacy price", result.Price, tc.wantPrice)
+			assertEqual(t, "availability status", result.AvailabilityStatus, tc.wantAvailability)
+			assertEqual(t, "featured offer status", result.FeaturedOfferStatus, tc.wantOffer)
+		})
+	}
+}
+
+func TestFeaturedOfferPresentWinsOverSecondaryUsedOffer(t *testing.T) {
+	html := `<html><body>
+	  <input id="ASIN" value="B0FNMPQSJC"/>
+	  <div id="corePrice_feature_div"><span class="a-offscreen">$199.99</span></div>
+	  <div id="desktop_buybox">
+	    <div id="availability">In Stock</div>
+	    <div id="merchant-info">Ships from Amazon.com Sold by <a id="sellerProfileTriggerId" href="/sp?seller=A1LIGHTDOT">Lightdot Direct</a></div>
+	  </div>
+	  <div id="usedBuyBox"><span>Used - Like New from $149.99</span><span>Sold by Amazon Resale</span></div>
+	</body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := LinkInspectionItem{
+		Original: "https://www.amazon.com/dp/B0FNMPQSJC",
+		URL:      "https://www.amazon.com/dp/B0FNMPQSJC",
+		ASIN:     "B0FNMPQSJC",
+		Domain:   "www.amazon.com",
+	}
+
+	result := extractLinkInspectionFields(doc, item)
+	assertEqual(t, "availability", result.AvailabilityStatus, availabilityStatusAvailable)
+	assertEqual(t, "featured offer", result.FeaturedOfferStatus, featuredOfferStatusPresent)
+	assertEqual(t, "seller id", result.SellerID, "A1LIGHTDOT")
+	assertEqual(t, "seller name", result.SellerName, "Lightdot Direct")
+}
+
+func TestUnavailablePageWithPriceAndBuyboxIsNotFeaturedOfferPresent(t *testing.T) {
+	html := `<html><body>
+	  <input id="ASIN" value="B0FNMPQSJC"/>
+	  <div id="corePrice_feature_div"><span class="a-offscreen">$199.99</span></div>
+	  <div id="desktop_buybox"><div id="availability">Currently unavailable.</div></div>
+	</body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := LinkInspectionItem{
+		Original: "https://www.amazon.com/dp/B0FNMPQSJC",
+		URL:      "https://www.amazon.com/dp/B0FNMPQSJC",
+		ASIN:     "B0FNMPQSJC",
+		Domain:   "www.amazon.com",
+	}
+
+	result := extractLinkInspectionFields(doc, item)
+	assertEqual(t, "legacy price remains unchanged", result.Price, "$199.99")
+	assertEqual(t, "availability", result.AvailabilityStatus, availabilityStatusUnavailable)
+	assertEqual(t, "featured offer", result.FeaturedOfferStatus, featuredOfferStatusUnknown)
+	assertEqual(t, "seller id", result.SellerID, "")
+	assertEqual(t, "seller name", result.SellerName, "")
+}
+
+func TestUsedOnlyDoesNotExposeFeaturedOfferSeller(t *testing.T) {
+	html := `<html><body>
+	  <div id="usedBuyBox">
+	    <span>No featured offers available</span>
+	    <span>Condition: Used - Like New</span>
+	    <a id="sellerProfileTriggerId" href="/sp?seller=A1USEDSELLER">Amazon Resale</a>
+	    <input id="merchantID" value="A1USEDSELLER"/>
+	    <input id="add-to-cart-button"/>
+	  </div>
+	</body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := LinkInspectionItem{
+		Original: "https://www.amazon.com/dp/B0FNMPQSJC",
+		URL:      "https://www.amazon.com/dp/B0FNMPQSJC",
+		ASIN:     "B0FNMPQSJC",
+		Domain:   "www.amazon.com",
+	}
+
+	result := extractLinkInspectionFields(doc, item)
+	assertEqual(t, "featured offer", result.FeaturedOfferStatus, featuredOfferStatusUsedOnly)
+	assertEqual(t, "seller id", result.SellerID, "")
+	assertEqual(t, "seller name", result.SellerName, "")
+}
+
+func TestNoFeaturedOfferOverridesPriceForStructuredStatus(t *testing.T) {
+	html := `<html><body>
+	  <input id="ASIN" value="B0FNMPQSJC"/>
+	  <div id="corePrice_feature_div"><span class="a-offscreen">$199.99</span></div>
+	  <div id="rightCol"><span>No featured offers available</span><a>See All Buying Options</a><input id="add-to-cart-button"/></div>
+	</body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := LinkInspectionItem{
+		Original: "https://www.amazon.com/dp/B0FNMPQSJC",
+		URL:      "https://www.amazon.com/dp/B0FNMPQSJC",
+		ASIN:     "B0FNMPQSJC",
+		Domain:   "www.amazon.com",
+	}
+
+	result := extractLinkInspectionFields(doc, item)
+	assertEqual(t, "legacy price remains unchanged", result.Price, "$199.99")
+	assertEqual(t, "availability status", result.AvailabilityStatus, availabilityStatusAvailable)
+	assertEqual(t, "featured offer status", result.FeaturedOfferStatus, featuredOfferStatusMissing)
+	if !strings.Contains(result.FeaturedOfferText, "No featured offers available") {
+		t.Fatalf("featured offer text = %q", result.FeaturedOfferText)
+	}
+	if result.PriceValue == nil || *result.PriceValue != 199.99 {
+		t.Fatalf("price value = %v", result.PriceValue)
+	}
+	assertEqual(t, "currency", result.Currency, "USD")
+}
+
+func TestExtractStructuredOfferSellerAndRedirectFields(t *testing.T) {
+	html := `<html><body>
+	  <input id="ASIN" value="B0DKF7HNZX"/>
+	  <div id="corePrice_feature_div"><span class="a-offscreen">$95.99</span></div>
+	  <div id="desktop_buybox">
+	    <div id="availability">Only 3 left in stock - order soon.</div>
+	    <div id="merchant-info">Ships from Amazon.com Sold by <a id="sellerProfileTriggerId" href="/sp?seller=A1LIGHTDOT&amp;ref_=dp_merchant_link">Lightdot Direct</a></div>
+	    <input id="add-to-cart-button"/>
+	  </div>
+	</body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := LinkInspectionItem{
+		Original: "https://www.amazon.com/dp/B0B6FZ1R2L",
+		URL:      "https://www.amazon.com/dp/B0B6FZ1R2L",
+		ASIN:     "B0B6FZ1R2L",
+		Domain:   "www.amazon.com",
+	}
+	finalURL := "https://www.amazon.com/dp/B0DKF7HNZX?th=1"
+
+	result := extractLinkInspectionPageFields(doc, item, finalURL)
+	assertEqual(t, "legacy asin", result.ASIN, "B0DKF7HNZX")
+	assertEqual(t, "actual asin", result.ActualASIN, "B0DKF7HNZX")
+	assertEqual(t, "final url", result.FinalURL, finalURL)
+	assertEqual(t, "legacy variant price", result.Price, variantPriceStatus)
+	if result.PriceValue == nil || *result.PriceValue != 95.99 {
+		t.Fatalf("price value = %v", result.PriceValue)
+	}
+	assertEqual(t, "currency", result.Currency, "USD")
+	assertEqual(t, "availability", result.AvailabilityStatus, availabilityStatusAvailable)
+	assertEqual(t, "featured offer", result.FeaturedOfferStatus, featuredOfferStatusPresent)
+	assertEqual(t, "seller id", result.SellerID, "A1LIGHTDOT")
+	assertEqual(t, "seller name", result.SellerName, "Lightdot Direct")
+	if !strings.Contains(result.FeaturedOfferText, "Sold by Lightdot Direct") {
+		t.Fatalf("featured offer text = %q", result.FeaturedOfferText)
+	}
+}
+
+func TestActualASINFallsBackToFinalURL(t *testing.T) {
+	html := `<html><body><span id="productTitle">Redirected product</span></body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := LinkInspectionItem{
+		Original: "https://www.amazon.com/dp/B0B6FZ1R2L",
+		URL:      "https://www.amazon.com/dp/B0B6FZ1R2L",
+		ASIN:     "B0B6FZ1R2L",
+		Domain:   "www.amazon.com",
+	}
+	finalURL := "https://www.amazon.com/gp/product/B0DKF7HNZX?th=1"
+
+	result := extractLinkInspectionPageFields(doc, item, finalURL)
+	assertEqual(t, "actual asin", result.ActualASIN, "B0DKF7HNZX")
+	assertEqual(t, "legacy asin", result.ASIN, "B0DKF7HNZX")
+	assertEqual(t, "final url", result.FinalURL, finalURL)
+	assertEqual(t, "variant price", result.Price, variantPriceStatus)
+}
+
+func TestExtractFeaturedOfferSellerSupportsKnownSelectorVariant(t *testing.T) {
+	html := `<html><body>
+	  <div id="corePrice_feature_div"><span class="a-offscreen">$95.99</span></div>
+	  <div id="desktop_buybox">
+	    <a id="vse-seller-link" href="/sp?seller=A1VSESELLER">VSE Seller</a>
+	    <input id="add-to-cart-button"/>
+	  </div>
+	</body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := LinkInspectionItem{
+		Original: "B0FNMPQSJC",
+		URL:      "https://www.amazon.com/dp/B0FNMPQSJC",
+		ASIN:     "B0FNMPQSJC",
+		Domain:   "www.amazon.com",
+	}
+
+	result := extractLinkInspectionFields(doc, item)
+	assertEqual(t, "featured offer", result.FeaturedOfferStatus, featuredOfferStatusPresent)
+	assertEqual(t, "seller id", result.SellerID, "A1VSESELLER")
+	assertEqual(t, "seller name", result.SellerName, "VSE Seller")
+}
+
+func TestExtractStructuredPriceSupportsMarketplaceFormats(t *testing.T) {
+	cases := []struct {
+		name         string
+		price        string
+		domain       string
+		wantValue    float64
+		wantCurrency string
+	}{
+		{name: "usd thousands", price: "$1,299.99", domain: "www.amazon.com", wantValue: 1299.99, wantCurrency: "USD"},
+		{name: "mxn domain fallback", price: "$1,299.00", domain: "www.amazon.com.mx", wantValue: 1299, wantCurrency: "MXN"},
+		{name: "eur decimal comma", price: "199,99 €", domain: "www.amazon.de", wantValue: 199.99, wantCurrency: "EUR"},
+		{name: "eur space thousands", price: "1 299,99 €", domain: "www.amazon.de", wantValue: 1299.99, wantCurrency: "EUR"},
+		{name: "eur narrow no-break space thousands", price: "1\u202f299,99 €", domain: "www.amazon.fr", wantValue: 1299.99, wantCurrency: "EUR"},
+		{name: "jpy thousands", price: "￥1,299", domain: "www.amazon.co.jp", wantValue: 1299, wantCurrency: "JPY"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			value, currency := extractStructuredPrice(tc.price, tc.domain)
+			if value == nil || *value != tc.wantValue {
+				t.Fatalf("price value = %v, want %v", value, tc.wantValue)
+			}
+			assertEqual(t, "currency", currency, tc.wantCurrency)
+		})
+	}
+}
+
 func TestChoiceFallsBackToContainerButNormalizes(t *testing.T) {
 	html := `<html><body><div id="acBadge_feature_div">Amazon's Choice in Outdoor Wall Lights by Lightdot</div></body></html>`
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))

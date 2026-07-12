@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/PuerkitoBio/goquery"
 	log "github.com/tengfei-xy/go-log"
@@ -22,14 +23,37 @@ import (
 )
 
 var (
-	linkASINRe         = regexp.MustCompile(`(?i)/(?:dp|gp/product)/([A-Z0-9]{10})`)
-	bareASINRe         = regexp.MustCompile(`(?i)(^|[^A-Z0-9])([A-Z0-9]{10})([^A-Z0-9]|$)`)
-	promoAmountRe      = regexp.MustCompile(`(?i)(\d{1,3}%|\$\d+(?:\.\d+)?)`)
-	moneyAmountRe      = regexp.MustCompile(`\$?\s*([0-9][0-9,]*(?:\.\d{1,2})?)`)
-	firstNumberRe      = regexp.MustCompile(`\d+`)
-	decimalNumberRe    = regexp.MustCompile(`\d+(?:\.\d+)?`)
-	variantPriceStatus = "不可售-变体"
-	inspectionHeaders  = []string{
+	linkASINRe             = regexp.MustCompile(`(?i)/(?:dp|gp/product)/([A-Z0-9]{10})`)
+	bareASINRe             = regexp.MustCompile(`(?i)(^|[^A-Z0-9])([A-Z0-9]{10})([^A-Z0-9]|$)`)
+	promoAmountRe          = regexp.MustCompile(`(?i)(\d{1,3}%|\$\d+(?:\.\d+)?)`)
+	moneyAmountRe          = regexp.MustCompile(`\$?\s*([0-9][0-9,]*(?:\.\d{1,2})?)`)
+	localizedMoneyAmountRe = regexp.MustCompile(`[0-9]+(?:[.,][0-9]+)*`)
+	firstNumberRe          = regexp.MustCompile(`\d+`)
+	decimalNumberRe        = regexp.MustCompile(`\d+(?:\.\d+)?`)
+	soldByNameRe           = regexp.MustCompile(`(?i)\bsold by\s+(.+?)(?:\s+(?:ships from|(?:and\s+)?fulfilled by|returns|payment|secure transaction)\b|$)`)
+
+	featuredOfferEvidenceSelectors = []string{
+		"#desktop_buybox",
+		"#buybox",
+		"#buybox_feature_div",
+		"#qualifiedBuyBox",
+		"#unqualifiedBuyBox_feature_div",
+		"#apex_desktop_buybox",
+		"#offerDisplayGroup",
+		"#rightCol",
+		"[id*=\"BuyBox\"]",
+		"[id*=\"buybox\"]",
+	}
+	availabilityEvidenceSelectors = []string{
+		"#availability",
+		"#availabilityInsideBuyBox_feature_div",
+		"#outOfStock",
+		"#desktop_buybox",
+		"#buybox",
+		"#buybox_feature_div",
+		"#rightCol",
+	}
+	inspectionHeaders = []string{
 		"产品",
 		"原ASIN",
 		"ASIN",
@@ -50,6 +74,20 @@ var (
 	}
 )
 
+const (
+	availabilityStatusAvailable   = "available"
+	availabilityStatusUnavailable = "unavailable"
+	availabilityStatusUnknown     = "unknown"
+
+	featuredOfferStatusPresent  = "present"
+	featuredOfferStatusMissing  = "missing"
+	featuredOfferStatusUsedOnly = "used_only"
+	featuredOfferStatusUnknown  = "unknown"
+
+	variantPriceStatus         = "不可售-变体"
+	usedOfferContainerSelector = "#usedBuyBox, #usedBuyBox_feature_div"
+)
+
 // LinkInspector implements the EasySpider-compatible product link inspection mode.
 type LinkInspector struct {
 	inputFile     string
@@ -67,24 +105,48 @@ type LinkInspectionItem struct {
 }
 
 type LinkInspectionResult struct {
-	Item            LinkInspectionItem
-	Product         string
-	ASIN            string
-	Price           string
-	Coupon          string
-	IsDeal          string
-	PrimeExclusive  string
-	DisplayDiscount string
-	Rating          string
-	ReviewCount     int
-	PromoCheck      string
-	Promotion       string
-	PromoCode       string
-	Keep            string
-	Choice          string
-	FrequentReturn  string
-	NewerModel      string
-	ErrorMessage    string
+	Item                LinkInspectionItem
+	Product             string
+	ASIN                string
+	ActualASIN          string
+	FinalURL            string
+	Price               string
+	PriceValue          *float64
+	Currency            string
+	AvailabilityStatus  string
+	FeaturedOfferStatus string
+	FeaturedOfferText   string
+	SellerID            string
+	SellerName          string
+	Coupon              string
+	IsDeal              string
+	PrimeExclusive      string
+	DisplayDiscount     string
+	Rating              string
+	ReviewCount         int
+	PromoCheck          string
+	Promotion           string
+	PromoCode           string
+	Keep                string
+	Choice              string
+	FrequentReturn      string
+	NewerModel          string
+	ErrorMessage        string
+}
+
+type inspectionPage struct {
+	Document *goquery.Document
+	FinalURL string
+}
+
+type inspectionContractFields struct {
+	AvailabilityStatus  string
+	FeaturedOfferStatus string
+	FeaturedOfferText   string
+	SellerID            string
+	SellerName          string
+	PriceValue          *float64
+	Currency            string
 }
 
 func NewLinkInspector(inputFile, domain, outputFile string) *LinkInspector {
@@ -142,33 +204,37 @@ func (s *LinkInspector) Run() error {
 
 func (s *LinkInspector) inspectItem(item LinkInspectionItem) LinkInspectionResult {
 	result := LinkInspectionResult{
-		Item:            item,
-		ASIN:            item.ASIN,
-		Coupon:          " ",
-		IsDeal:          " ",
-		PrimeExclusive:  " ",
-		DisplayDiscount: " ",
+		Item:                item,
+		ASIN:                item.ASIN,
+		ActualASIN:          item.ASIN,
+		FinalURL:            item.URL,
+		AvailabilityStatus:  availabilityStatusUnknown,
+		FeaturedOfferStatus: featuredOfferStatusUnknown,
+		Coupon:              " ",
+		IsDeal:              " ",
+		PrimeExclusive:      " ",
+		DisplayDiscount:     " ",
 	}
 
-	doc, err := s.fetchDocument(item)
+	page, err := s.fetchDocument(item)
 	if err != nil {
 		result.ErrorMessage = err.Error()
 		return result
 	}
 
-	extracted := extractLinkInspectionFields(doc, item)
+	extracted := extractLinkInspectionPageFields(page.Document, item, page.FinalURL)
 	extracted.ErrorMessage = result.ErrorMessage
 	return extracted
 }
 
-func (s *LinkInspector) fetchDocument(item LinkInspectionItem) (*goquery.Document, error) {
+func (s *LinkInspector) fetchDocument(item LinkInspectionItem) (inspectionPage, error) {
 	fp := GetCurrentFingerprint()
 	robots, err := s.robotsForDomain(item.Domain)
 	if err != nil {
-		return nil, err
+		return inspectionPage{}, err
 	}
 	if err := robots.IsAllow(fp.UserAgent, item.URL); err != nil {
-		return nil, err
+		return inspectionPage{}, err
 	}
 
 	var lastErr error
@@ -176,7 +242,7 @@ func (s *LinkInspector) fetchDocument(item LinkInspectionItem) (*goquery.Documen
 		client := get_client()
 		req, err := http.NewRequest("GET", item.URL, nil)
 		if err != nil {
-			return nil, err
+			return inspectionPage{}, err
 		}
 		ApplyFingerprint(req, GetRandomReferer(item.Domain))
 		if app.cookie != "" {
@@ -203,19 +269,23 @@ func (s *LinkInspector) fetchDocument(item LinkInspectionItem) (*goquery.Documen
 			if attempt == 0 {
 				if err := app.handleCookieInvalid(); err != nil {
 					log.Errorf("切换 Cookie 失败: %v", err)
-					return nil, lastErr
+					return inspectionPage{}, lastErr
 				}
 				continue
 			}
-			return nil, lastErr
+			return inspectionPage{}, lastErr
 		}
-		return doc, nil
+		finalURL := item.URL
+		if resp.Request != nil && resp.Request.URL != nil {
+			finalURL = resp.Request.URL.String()
+		}
+		return inspectionPage{Document: doc, FinalURL: finalURL}, nil
 	}
 
 	if lastErr == nil {
 		lastErr = fmt.Errorf("请求失败")
 	}
-	return nil, lastErr
+	return inspectionPage{}, lastErr
 }
 
 func (s *LinkInspector) robotsForDomain(domain string) (Robots, error) {
@@ -245,13 +315,17 @@ func documentFromResponse(resp *http.Response) (*goquery.Document, error) {
 }
 
 func extractLinkInspectionFields(doc *goquery.Document, item LinkInspectionItem) LinkInspectionResult {
+	return extractLinkInspectionPageFields(doc, item, item.URL)
+}
+
+func extractLinkInspectionPageFields(doc *goquery.Document, item LinkInspectionItem, finalURL string) LinkInspectionResult {
 	reviewCount := extractReviewCountValue(textBySelectors(doc, []string{
 		"#acrCustomerReviewText",
 		"[data-hook=\"total-review-count\"]",
 		"#averageCustomerReviews .a-size-base.a-color-secondary",
 	}))
 
-	asin := extractActualASINValue(doc, item)
+	asin := extractActualASINValueWithFinalURL(doc, item, finalURL)
 
 	rating := extractRatingValue(textBySelectors(doc, []string{
 		"#averageCustomerReviews span[aria-hidden=\"true\"]",
@@ -262,7 +336,9 @@ func extractLinkInspectionFields(doc *goquery.Document, item LinkInspectionItem)
 	if reviewCount == 0 {
 		rating = ""
 	}
-	price := extractCurrentPriceValue(doc)
+	currentPrice := extractCurrentPriceValue(doc)
+	contract := extractInspectionContractFields(doc, item, currentPrice)
+	price := currentPrice
 	if isVariantASIN(item.ASIN, asin) {
 		price = variantPriceStatus
 	} else if strings.TrimSpace(price) == "" {
@@ -270,18 +346,27 @@ func extractLinkInspectionFields(doc *goquery.Document, item LinkInspectionItem)
 	}
 
 	result := LinkInspectionResult{
-		Item:            item,
-		Product:         textBySelectors(doc, []string{"#productTitle"}),
-		ASIN:            asin,
-		Price:           price,
-		Coupon:          defaultSpace(extractCouponValue(doc)),
-		IsDeal:          defaultSpace(textBySelectors(doc, []string{"#dealBadgeSupportingText", "#dealBadge_feature_div"})),
-		PrimeExclusive:  defaultSpace(textBySelectors(doc, []string{"#primeExclusivePricingMessage .a-size-base", "#primeExclusivePricingMessage"})),
-		DisplayDiscount: defaultSpace(calculateDisplayDiscount(extractListPriceValue(doc), price)),
-		Rating:          rating,
-		ReviewCount:     reviewCount,
-		PromoCheck:      extractPromoCheckValue(doc),
-		Promotion:       extractPromotionValue(doc),
+		Item:                item,
+		Product:             textBySelectors(doc, []string{"#productTitle"}),
+		ASIN:                asin,
+		ActualASIN:          asin,
+		FinalURL:            inspectionFinalURL(finalURL, item.URL),
+		Price:               price,
+		PriceValue:          contract.PriceValue,
+		Currency:            contract.Currency,
+		AvailabilityStatus:  contract.AvailabilityStatus,
+		FeaturedOfferStatus: contract.FeaturedOfferStatus,
+		FeaturedOfferText:   contract.FeaturedOfferText,
+		SellerID:            contract.SellerID,
+		SellerName:          contract.SellerName,
+		Coupon:              defaultSpace(extractCouponValue(doc)),
+		IsDeal:              defaultSpace(textBySelectors(doc, []string{"#dealBadgeSupportingText", "#dealBadge_feature_div"})),
+		PrimeExclusive:      defaultSpace(textBySelectors(doc, []string{"#primeExclusivePricingMessage .a-size-base", "#primeExclusivePricingMessage"})),
+		DisplayDiscount:     defaultSpace(calculateDisplayDiscount(extractListPriceValue(doc), price)),
+		Rating:              rating,
+		ReviewCount:         reviewCount,
+		PromoCheck:          extractPromoCheckValue(doc),
+		Promotion:           extractPromotionValue(doc),
 		PromoCode: textBySelectors(doc, []string{
 			"#promoPriceBlockMessage_feature_div .promoPriceBlockMessage > div:nth-child(2) span span:nth-child(2)",
 			"#promoPriceBlockMessage_feature_div span[id^=\"promoCode\"]",
@@ -297,12 +382,19 @@ func extractLinkInspectionFields(doc *goquery.Document, item LinkInspectionItem)
 }
 
 func extractActualASINValue(doc *goquery.Document, item LinkInspectionItem) string {
+	return extractActualASINValueWithFinalURL(doc, item, "")
+}
+
+func extractActualASINValueWithFinalURL(doc *goquery.Document, item LinkInspectionItem, finalURL string) string {
 	asin := cleanText(attrBySelectors(doc, []string{"input#ASIN", "input[name=\"ASIN\"]"}, "value"))
 	if asin != "" {
 		return strings.ToUpper(asin)
 	}
 	if canonicalASIN := extractASINFromString(attrBySelectors(doc, []string{"link[rel=\"canonical\"]"}, "href")); canonicalASIN != "" {
 		return canonicalASIN
+	}
+	if finalURLASIN := extractASINFromString(finalURL); finalURLASIN != "" {
+		return finalURLASIN
 	}
 	return item.ASIN
 }
@@ -311,6 +403,546 @@ func isVariantASIN(originalASIN, actualASIN string) bool {
 	originalASIN = strings.ToUpper(strings.TrimSpace(originalASIN))
 	actualASIN = strings.ToUpper(strings.TrimSpace(actualASIN))
 	return originalASIN != "" && actualASIN != "" && originalASIN != actualASIN
+}
+
+func extractInspectionContractFields(doc *goquery.Document, item LinkInspectionItem, currentPrice string) inspectionContractFields {
+	sellerID, sellerName := extractFeaturedOfferSeller(doc)
+	featuredOfferStatus, featuredOfferText := extractFeaturedOfferState(doc, currentPrice, sellerID, sellerName)
+	if featuredOfferStatus != featuredOfferStatusPresent {
+		sellerID = ""
+		sellerName = ""
+	}
+
+	priceValue, currency := extractStructuredPrice(currentPrice, item.Domain)
+	return inspectionContractFields{
+		AvailabilityStatus:  extractAvailabilityStatus(doc, currentPrice, featuredOfferStatus),
+		FeaturedOfferStatus: featuredOfferStatus,
+		FeaturedOfferText:   featuredOfferText,
+		SellerID:            sellerID,
+		SellerName:          sellerName,
+		PriceValue:          priceValue,
+		Currency:            currency,
+	}
+}
+
+func extractFeaturedOfferState(doc *goquery.Document, currentPrice, sellerID, sellerName string) (string, string) {
+	if evidence := extractPrimaryUsedOnlyEvidence(doc, currentPrice, sellerID, sellerName); evidence != "" {
+		return featuredOfferStatusUsedOnly, evidence
+	}
+
+	missingPhrases := []string{
+		"no featured offers available",
+		"no featured offer available",
+	}
+	missingEvidence := evidenceTextContainingAny(doc, featuredOfferEvidenceSelectors, missingPhrases, 800)
+
+	usedPhrases := []string{
+		"buy used",
+		"used:",
+		"condition: used",
+		"sold by amazon resale",
+		"pre-owned",
+	}
+	usedEvidence := evidenceTextContainingAny(doc, featuredOfferEvidenceSelectors, usedPhrases, 800)
+	hasPresentSignal := hasFeaturedOfferSignal(doc, currentPrice, sellerID, sellerName)
+	if usedEvidence != "" && !hasPresentSignal {
+		return featuredOfferStatusUsedOnly, usedEvidence
+	}
+	if missingEvidence != "" {
+		return featuredOfferStatusMissing, missingEvidence
+	}
+	if extractUnavailableEvidence(doc) != "" {
+		return featuredOfferStatusUnknown, ""
+	}
+	if hasPresentSignal {
+		return featuredOfferStatusPresent, buildFeaturedOfferEvidence(doc, currentPrice, sellerName)
+	}
+	if usedEvidence != "" {
+		return featuredOfferStatusUsedOnly, usedEvidence
+	}
+
+	return featuredOfferStatusUnknown, ""
+}
+
+func extractPrimaryUsedOnlyEvidence(doc *goquery.Document, currentPrice, sellerID, sellerName string) string {
+	dedicatedUsedPhrases := []string{
+		"buy used",
+		"used:",
+		"condition: used",
+		"used - like",
+		"used - good",
+		"amazon resale",
+		"pre-owned",
+	}
+	if evidence := selectionEvidenceContainingAny(doc, []string{
+		"#usedBuyBox",
+		"#usedBuyBox_feature_div",
+	}, dedicatedUsedPhrases, 800); evidence != "" && !hasFeaturedOfferSignal(doc, currentPrice, sellerID, sellerName) {
+		return evidence
+	}
+
+	primaryConditionPhrases := []string{
+		"condition: used",
+		"sold by amazon resale",
+		"pre-owned",
+	}
+	return selectionEvidenceContainingAnyExcluding(doc, []string{
+		"#desktop_buybox",
+		"#buybox",
+		"#buybox_feature_div",
+		"#qualifiedBuyBox",
+	}, primaryConditionPhrases, 800, usedOfferContainerSelector)
+}
+
+func extractAvailabilityStatus(doc *goquery.Document, currentPrice, featuredOfferStatus string) string {
+	if extractUnavailableEvidence(doc) != "" {
+		return availabilityStatusUnavailable
+	}
+
+	if featuredOfferStatus == featuredOfferStatusPresent || featuredOfferStatus == featuredOfferStatusUsedOnly {
+		return availabilityStatusAvailable
+	}
+	if strings.TrimSpace(currentPrice) != "" || hasPurchaseControl(doc) {
+		return availabilityStatusAvailable
+	}
+
+	availablePhrases := []string{
+		"in stock",
+		"left in stock",
+		"available to ship",
+		"see all buying options",
+	}
+	if evidenceTextContainingAny(doc, availabilityEvidenceSelectors, availablePhrases, 800) != "" {
+		return availabilityStatusAvailable
+	}
+
+	return availabilityStatusUnknown
+}
+
+func extractUnavailableEvidence(doc *goquery.Document) string {
+	return evidenceTextContainingAny(doc, availabilityEvidenceSelectors, []string{
+		"currently unavailable",
+		"we don't know when or if this item will be back in stock",
+		"temporarily out of stock",
+		"not available for purchase",
+	}, 800)
+}
+
+func hasFeaturedOfferSignal(doc *goquery.Document, currentPrice, sellerID, sellerName string) bool {
+	if hasPurchaseControlOutsideUsedOffer(doc) {
+		return true
+	}
+	if strings.TrimSpace(currentPrice) == "" {
+		return false
+	}
+	return sellerID != "" || sellerName != ""
+}
+
+func hasPurchaseControl(doc *goquery.Document) bool {
+	return hasAnySelection(doc, purchaseControlSelectors())
+}
+
+func hasPurchaseControlOutsideUsedOffer(doc *goquery.Document) bool {
+	for _, selector := range purchaseControlSelectors() {
+		found := false
+		doc.Find(selector).EachWithBreak(func(_ int, selection *goquery.Selection) bool {
+			if selectionInsideUsedOffer(selection) {
+				return true
+			}
+			found = true
+			return false
+		})
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
+func purchaseControlSelectors() []string {
+	return []string{
+		"#add-to-cart-button",
+		"#buy-now-button",
+		"input[name=\"submit.add-to-cart\"]",
+		"input[name=\"submit.buy-now\"]",
+		"form#addToCart",
+	}
+}
+
+func hasAnySelection(doc *goquery.Document, selectors []string) bool {
+	for _, selector := range selectors {
+		if doc.Find(selector).Length() > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func evidenceTextContainingAny(doc *goquery.Document, selectors, phrases []string, maxLen int) string {
+	best := selectionEvidenceContainingAny(doc, selectors, phrases, maxLen)
+	fallback := selectionEvidenceContainingAny(doc, []string{
+		"div, section, aside, table, tr, td, li, p, span",
+	}, phrases, maxLen)
+	if fallback != "" && (best == "" || len(fallback) < len(best)) {
+		best = fallback
+	}
+	return best
+}
+
+func selectionEvidenceContainingAny(doc *goquery.Document, selectors, phrases []string, maxLen int) string {
+	best := ""
+	for _, selector := range selectors {
+		doc.Find(selector).Each(func(_ int, selection *goquery.Selection) {
+			text := selectionTextWithoutScripts(selection)
+			if text == "" || (maxLen > 0 && len(text) > maxLen) || !containsAnyPhrase(text, phrases) {
+				return
+			}
+			if best == "" || len(text) < len(best) {
+				best = text
+			}
+		})
+	}
+	return best
+}
+
+func selectionEvidenceContainingAnyExcluding(
+	doc *goquery.Document,
+	selectors []string,
+	phrases []string,
+	maxLen int,
+	excludedSelector string,
+) string {
+	best := ""
+	for _, selector := range selectors {
+		doc.Find(selector).Each(func(_ int, selection *goquery.Selection) {
+			clone := selection.Clone()
+			clone.Find(excludedSelector).Remove()
+			text := selectionTextWithoutScripts(clone)
+			if text == "" || (maxLen > 0 && len(text) > maxLen) || !containsAnyPhrase(text, phrases) {
+				return
+			}
+			if best == "" || len(text) < len(best) {
+				best = text
+			}
+		})
+	}
+	return best
+}
+
+func containsAnyPhrase(text string, phrases []string) bool {
+	lower := strings.ToLower(text)
+	for _, phrase := range phrases {
+		if strings.Contains(lower, strings.ToLower(phrase)) {
+			return true
+		}
+	}
+	return false
+}
+
+func buildFeaturedOfferEvidence(doc *goquery.Document, currentPrice, sellerName string) string {
+	parts := make([]string, 0, 4)
+	parts = appendEvidencePart(parts, currentPrice)
+	parts = appendEvidencePart(parts, textBySelectors(doc, []string{
+		"#availabilityInsideBuyBox_feature_div",
+		"#availability",
+	}))
+	parts = appendEvidencePart(parts, textBySelectors(doc, []string{
+		"#merchant-info",
+		"#tabular-buybox",
+		"#tabular-buybox-truncate-1",
+	}))
+	parts = appendEvidencePart(parts, sellerName)
+	return cleanText(strings.Join(parts, " "))
+}
+
+func appendEvidencePart(parts []string, value string) []string {
+	value = cleanText(value)
+	if value == "" {
+		return parts
+	}
+	for _, existing := range parts {
+		if existing == value || strings.Contains(existing, value) {
+			return parts
+		}
+	}
+	return append(parts, value)
+}
+
+func extractFeaturedOfferSeller(doc *goquery.Document) (string, string) {
+	sellerID := ""
+	sellerName := ""
+	selectors := []string{
+		"#sellerProfileTriggerId",
+		"#vse-seller-link",
+		"#merchant-info a[href*=\"seller=\"]",
+		"#merchant-info a[href*=\"/sp\"]",
+		"#tabular-buybox a[href*=\"seller=\"]",
+		"#tabular-buybox-container a[href*=\"seller=\"]",
+		"span.tabular-buybox-text a[href*=\"seller=\"]",
+		"div.tabular-buybox-container a[href*=\"seller=\"]",
+		"#desktop_buybox a[href*=\"seller=\"]",
+		"#buybox a[href*=\"seller=\"]",
+	}
+	for _, selector := range selectors {
+		doc.Find(selector).EachWithBreak(func(_ int, selection *goquery.Selection) bool {
+			if selectionInsideUsedOffer(selection) {
+				return true
+			}
+			name := cleanText(selection.Text())
+			if sellerName == "" && name != "" {
+				sellerName = name
+			}
+			href, _ := selection.Attr("href")
+			if id := extractSellerIDFromHref(href); id != "" {
+				sellerID = id
+				if name != "" {
+					sellerName = name
+				}
+				return false
+			}
+			return true
+		})
+		if sellerID != "" {
+			break
+		}
+	}
+
+	if sellerID == "" {
+		sellerID = cleanText(attrBySelectorsOutsideUsedOffer(doc, []string{
+			"input#merchantID",
+			"input[name=\"merchantID\"]",
+			"input[name=\"merchantId\"]",
+			"input[name=\"sellerID\"]",
+		}, "value"))
+	}
+	if sellerName == "" {
+		sellerName = textBySelectorsOutsideUsedOffer(doc, []string{
+			"#sellerProfileTriggerId",
+			"#vse-seller-link",
+			"#tabular-buybox-truncate-1 .tabular-buybox-text",
+			"#tabular-buybox .tabular-buybox-text",
+		})
+	}
+	if sellerName == "" {
+		sellerName = extractSellerNameFromMerchantText(textBySelectorsOutsideUsedOffer(doc, []string{
+			"#merchant-info",
+			"#tabular-buybox",
+			"#tabular-buybox-container",
+		}))
+	}
+	return sellerID, sellerName
+}
+
+func selectionInsideUsedOffer(selection *goquery.Selection) bool {
+	return selection.Is(usedOfferContainerSelector) ||
+		selection.ParentsFiltered(usedOfferContainerSelector).Length() > 0
+}
+
+func attrBySelectorsOutsideUsedOffer(doc *goquery.Document, selectors []string, attrName string) string {
+	for _, selector := range selectors {
+		value := ""
+		doc.Find(selector).EachWithBreak(func(_ int, selection *goquery.Selection) bool {
+			if selectionInsideUsedOffer(selection) {
+				return true
+			}
+			if candidate, ok := selection.Attr(attrName); ok {
+				value = candidate
+				return false
+			}
+			return true
+		})
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func textBySelectorsOutsideUsedOffer(doc *goquery.Document, selectors []string) string {
+	for _, selector := range selectors {
+		value := ""
+		doc.Find(selector).EachWithBreak(func(_ int, selection *goquery.Selection) bool {
+			if selectionInsideUsedOffer(selection) {
+				return true
+			}
+			value = cleanText(selection.Text())
+			return value == ""
+		})
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func extractSellerIDFromHref(href string) string {
+	href = strings.TrimSpace(href)
+	if href == "" {
+		return ""
+	}
+	if parsed, err := url.Parse(href); err == nil {
+		for _, key := range []string{"seller", "me", "smid"} {
+			if value := strings.TrimSpace(parsed.Query().Get(key)); value != "" {
+				return value
+			}
+		}
+	}
+
+	for _, marker := range []string{"seller=", "me=", "smid="} {
+		index := strings.Index(strings.ToLower(href), marker)
+		if index < 0 {
+			continue
+		}
+		value := href[index+len(marker):]
+		if end := strings.IndexAny(value, "&#"); end >= 0 {
+			value = value[:end]
+		}
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func extractSellerNameFromMerchantText(text string) string {
+	match := soldByNameRe.FindStringSubmatch(cleanText(text))
+	if len(match) < 2 {
+		return ""
+	}
+	return strings.Trim(cleanText(match[1]), " .,:;-")
+}
+
+func extractStructuredPrice(priceText, domain string) (*float64, string) {
+	value, ok := extractLocalizedMoneyValue(priceText)
+	if !ok {
+		return nil, ""
+	}
+	return &value, currencyCodeForPrice(priceText, domain)
+}
+
+func extractLocalizedMoneyValue(text string) (float64, bool) {
+	compactText := strings.Map(func(char rune) rune {
+		if unicode.IsSpace(char) {
+			return -1
+		}
+		return char
+	}, text)
+	match := localizedMoneyAmountRe.FindString(compactText)
+	if match == "" {
+		return 0, false
+	}
+
+	lastComma := strings.LastIndex(match, ",")
+	lastDot := strings.LastIndex(match, ".")
+	lastSeparator := lastComma
+	if lastDot > lastSeparator {
+		lastSeparator = lastDot
+	}
+	decimalSeparator := -1
+	if lastSeparator >= 0 {
+		digitsAfter := len(match) - lastSeparator - 1
+		if digitsAfter == 1 || digitsAfter == 2 {
+			decimalSeparator = lastSeparator
+		}
+	}
+
+	var normalized strings.Builder
+	for index, char := range match {
+		switch {
+		case char >= '0' && char <= '9':
+			normalized.WriteRune(char)
+		case index == decimalSeparator:
+			normalized.WriteByte('.')
+		}
+	}
+	value, err := strconv.ParseFloat(normalized.String(), 64)
+	if err != nil {
+		return 0, false
+	}
+	return value, true
+}
+
+func currencyCodeForPrice(priceText, domain string) string {
+	upper := strings.ToUpper(strings.ReplaceAll(cleanText(priceText), " ", ""))
+	switch {
+	case strings.Contains(upper, "US$") || strings.Contains(upper, "USD"):
+		return "USD"
+	case strings.Contains(upper, "MX$") || strings.Contains(upper, "MXN"):
+		return "MXN"
+	case strings.Contains(upper, "CA$") || strings.Contains(upper, "C$") || strings.Contains(upper, "CAD"):
+		return "CAD"
+	case strings.Contains(upper, "AU$") || strings.Contains(upper, "A$") || strings.Contains(upper, "AUD"):
+		return "AUD"
+	case strings.Contains(upper, "S$") || strings.Contains(upper, "SGD"):
+		return "SGD"
+	case strings.Contains(upper, "R$") || strings.Contains(upper, "BRL"):
+		return "BRL"
+	case strings.Contains(upper, "£") || strings.Contains(upper, "GBP"):
+		return "GBP"
+	case strings.Contains(upper, "€") || strings.Contains(upper, "EUR"):
+		return "EUR"
+	case strings.Contains(upper, "₹") || strings.Contains(upper, "INR"):
+		return "INR"
+	case strings.Contains(upper, "¥") || strings.Contains(upper, "￥") || strings.Contains(upper, "JPY"):
+		return "JPY"
+	case strings.Contains(upper, "AED"):
+		return "AED"
+	case strings.Contains(upper, "SAR"):
+		return "SAR"
+	case strings.Contains(upper, "SEK"):
+		return "SEK"
+	case strings.Contains(upper, "PLN"):
+		return "PLN"
+	case strings.Contains(upper, "TRY") || strings.Contains(upper, "₺"):
+		return "TRY"
+	}
+	return domainCurrencyCode(domain)
+}
+
+func domainCurrencyCode(domain string) string {
+	switch normalizeDomain(domain) {
+	case "amazon.com", "www.amazon.com":
+		return "USD"
+	case "amazon.com.mx", "www.amazon.com.mx":
+		return "MXN"
+	case "amazon.ca", "www.amazon.ca":
+		return "CAD"
+	case "amazon.co.uk", "www.amazon.co.uk":
+		return "GBP"
+	case "amazon.de", "www.amazon.de", "amazon.fr", "www.amazon.fr", "amazon.it", "www.amazon.it",
+		"amazon.es", "www.amazon.es", "amazon.nl", "www.amazon.nl", "amazon.com.be", "www.amazon.com.be",
+		"amazon.ie", "www.amazon.ie":
+		return "EUR"
+	case "amazon.co.jp", "www.amazon.co.jp":
+		return "JPY"
+	case "amazon.com.au", "www.amazon.com.au":
+		return "AUD"
+	case "amazon.in", "www.amazon.in":
+		return "INR"
+	case "amazon.com.br", "www.amazon.com.br":
+		return "BRL"
+	case "amazon.sg", "www.amazon.sg":
+		return "SGD"
+	case "amazon.ae", "www.amazon.ae":
+		return "AED"
+	case "amazon.sa", "www.amazon.sa":
+		return "SAR"
+	case "amazon.se", "www.amazon.se":
+		return "SEK"
+	case "amazon.pl", "www.amazon.pl":
+		return "PLN"
+	case "amazon.com.tr", "www.amazon.com.tr":
+		return "TRY"
+	default:
+		return ""
+	}
+}
+
+func inspectionFinalURL(finalURL, requestedURL string) string {
+	if finalURL = strings.TrimSpace(finalURL); finalURL != "" {
+		return finalURL
+	}
+	return strings.TrimSpace(requestedURL)
 }
 
 func loadLinkInspectionItems(inputFile, defaultDomain string) ([]LinkInspectionItem, error) {

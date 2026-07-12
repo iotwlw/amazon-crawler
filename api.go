@@ -16,13 +16,16 @@ const (
 	TASK_STATUS_PENDING   = 0 // 待执行
 	TASK_STATUS_COMPLETED = 1 // 已执行
 	TASK_STATUS_FAILED    = 2 // 失败
+
+	inspectionSchemaVersion = "2.0"
 )
 
 // APIResponse 统一响应结构
 type APIResponse struct {
-	Code    int         `json:"code"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data,omitempty"`
+	Code                    int         `json:"code"`
+	Message                 string      `json:"message"`
+	InspectionSchemaVersion string      `json:"inspection_schema_version,omitempty"`
+	Data                    interface{} `json:"data,omitempty"`
 }
 
 // CrawlRequest 爬取请求结构
@@ -61,29 +64,38 @@ type ASINInspectionResponseData struct {
 }
 
 type ASINInspectionResponseItem struct {
-	Input           string `json:"input"`
-	URL             string `json:"url"`
-	Domain          string `json:"domain"`
-	OriginalASIN    string `json:"original_asin"`
-	ASIN            string `json:"asin"`
-	Status          string `json:"status"`
-	ProductTitle    string `json:"product_title"`
-	Price           string `json:"price"`
-	Coupon          string `json:"coupon"`
-	IsDeal          string `json:"is_deal"`
-	PrimeExclusive  string `json:"prime_exclusive"`
-	DisplayDiscount string `json:"display_discount"`
-	Rating          string `json:"rating"`
-	ReviewCount     int    `json:"review_count"`
-	PromoCheck      string `json:"promo_check"`
-	Promotion       string `json:"promotion"`
-	PromoCode       string `json:"promo_code"`
-	Keep            string `json:"keep"`
-	ChoiceBadge     string `json:"choice_badge"`
-	FrequentReturn  string `json:"frequent_return"`
-	NewerModel      string `json:"newer_model"`
-	ErrorMessage    string `json:"error_message"`
-	CapturedAt      string `json:"captured_at"`
+	Input               string   `json:"input"`
+	URL                 string   `json:"url"`
+	FinalURL            string   `json:"final_url"`
+	Domain              string   `json:"domain"`
+	OriginalASIN        string   `json:"original_asin"`
+	ASIN                string   `json:"asin"`
+	ActualASIN          string   `json:"actual_asin"`
+	Status              string   `json:"status"`
+	ProductTitle        string   `json:"product_title"`
+	Price               string   `json:"price"`
+	PriceValue          *float64 `json:"price_value"`
+	Currency            string   `json:"currency"`
+	AvailabilityStatus  string   `json:"availability_status"`
+	FeaturedOfferStatus string   `json:"featured_offer_status"`
+	FeaturedOfferText   string   `json:"featured_offer_text"`
+	SellerID            string   `json:"seller_id"`
+	SellerName          string   `json:"seller_name"`
+	Coupon              string   `json:"coupon"`
+	IsDeal              string   `json:"is_deal"`
+	PrimeExclusive      string   `json:"prime_exclusive"`
+	DisplayDiscount     string   `json:"display_discount"`
+	Rating              string   `json:"rating"`
+	ReviewCount         int      `json:"review_count"`
+	PromoCheck          string   `json:"promo_check"`
+	Promotion           string   `json:"promotion"`
+	PromoCode           string   `json:"promo_code"`
+	Keep                string   `json:"keep"`
+	ChoiceBadge         string   `json:"choice_badge"`
+	FrequentReturn      string   `json:"frequent_return"`
+	NewerModel          string   `json:"newer_model"`
+	ErrorMessage        string   `json:"error_message"`
+	CapturedAt          string   `json:"captured_at"`
 }
 
 // StartHTTPServer 启动 HTTP 服务
@@ -228,8 +240,9 @@ func handleASINInspection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, APIResponse{
-		Code:    0,
-		Message: "ok",
+		Code:                    0,
+		Message:                 "ok",
+		InspectionSchemaVersion: inspectionSchemaVersion,
 		Data: ASINInspectionResponseData{
 			JobID: req.JobID,
 			Items: responseItems,
@@ -303,30 +316,55 @@ func linkInspectionResultToAPIItem(result LinkInspectionResult, capturedAt strin
 	if result.ErrorMessage != "" {
 		status = "failed"
 	}
+	actualASIN := result.ActualASIN
+	if actualASIN == "" {
+		actualASIN = result.ASIN
+	}
+	finalURL := result.FinalURL
+	if finalURL == "" {
+		finalURL = result.Item.URL
+	}
+	availabilityStatus := result.AvailabilityStatus
+	if availabilityStatus == "" {
+		availabilityStatus = availabilityStatusUnknown
+	}
+	featuredOfferStatus := result.FeaturedOfferStatus
+	if featuredOfferStatus == "" {
+		featuredOfferStatus = featuredOfferStatusUnknown
+	}
 	return ASINInspectionResponseItem{
-		Input:           result.Item.Original,
-		URL:             result.Item.URL,
-		Domain:          result.Item.Domain,
-		OriginalASIN:    result.Item.ASIN,
-		ASIN:            result.ASIN,
-		Status:          status,
-		ProductTitle:    result.Product,
-		Price:           result.Price,
-		Coupon:          result.Coupon,
-		IsDeal:          result.IsDeal,
-		PrimeExclusive:  result.PrimeExclusive,
-		DisplayDiscount: result.DisplayDiscount,
-		Rating:          result.Rating,
-		ReviewCount:     result.ReviewCount,
-		PromoCheck:      result.PromoCheck,
-		Promotion:       result.Promotion,
-		PromoCode:       result.PromoCode,
-		Keep:            result.Keep,
-		ChoiceBadge:     result.Choice,
-		FrequentReturn:  result.FrequentReturn,
-		NewerModel:      result.NewerModel,
-		ErrorMessage:    result.ErrorMessage,
-		CapturedAt:      capturedAt,
+		Input:               result.Item.Original,
+		URL:                 result.Item.URL,
+		FinalURL:            finalURL,
+		Domain:              result.Item.Domain,
+		OriginalASIN:        result.Item.ASIN,
+		ASIN:                result.ASIN,
+		ActualASIN:          actualASIN,
+		Status:              status,
+		ProductTitle:        result.Product,
+		Price:               result.Price,
+		PriceValue:          result.PriceValue,
+		Currency:            result.Currency,
+		AvailabilityStatus:  availabilityStatus,
+		FeaturedOfferStatus: featuredOfferStatus,
+		FeaturedOfferText:   result.FeaturedOfferText,
+		SellerID:            result.SellerID,
+		SellerName:          result.SellerName,
+		Coupon:              result.Coupon,
+		IsDeal:              result.IsDeal,
+		PrimeExclusive:      result.PrimeExclusive,
+		DisplayDiscount:     result.DisplayDiscount,
+		Rating:              result.Rating,
+		ReviewCount:         result.ReviewCount,
+		PromoCheck:          result.PromoCheck,
+		Promotion:           result.Promotion,
+		PromoCode:           result.PromoCode,
+		Keep:                result.Keep,
+		ChoiceBadge:         result.Choice,
+		FrequentReturn:      result.FrequentReturn,
+		NewerModel:          result.NewerModel,
+		ErrorMessage:        result.ErrorMessage,
+		CapturedAt:          capturedAt,
 	}
 }
 
