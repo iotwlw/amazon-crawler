@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestHealthIdentifiesInspectionServiceAndContract(t *testing.T) {
@@ -34,6 +38,89 @@ func TestHealthIdentifiesInspectionServiceAndContract(t *testing.T) {
 		t.Fatalf("service type = %T", data["service"])
 	}
 	assertEqual(t, "service", service, "amazon-crawler")
+}
+
+func TestASINInspectionConcurrencyConfigurationIsBounded(t *testing.T) {
+	t.Setenv("CRAWLER_ASIN_CONCURRENCY", "")
+	if got := asinInspectionConcurrency(); got != defaultASINConcurrency {
+		t.Fatalf("default concurrency = %d, want %d", got, defaultASINConcurrency)
+	}
+	t.Setenv("CRAWLER_ASIN_CONCURRENCY", "0")
+	if got := asinInspectionConcurrency(); got != 1 {
+		t.Fatalf("minimum concurrency = %d, want 1", got)
+	}
+	t.Setenv("CRAWLER_ASIN_CONCURRENCY", "99")
+	if got := asinInspectionConcurrency(); got != maxASINConcurrency {
+		t.Fatalf("maximum concurrency = %d, want %d", got, maxASINConcurrency)
+	}
+	t.Setenv("CRAWLER_ASIN_CONCURRENCY", "invalid")
+	if got := asinInspectionConcurrency(); got != defaultASINConcurrency {
+		t.Fatalf("invalid concurrency = %d, want %d", got, defaultASINConcurrency)
+	}
+}
+
+func TestInspectASINItemsBoundsConcurrencyAndKeepsInputOrder(t *testing.T) {
+	items := make([]LinkInspectionItem, 12)
+	for index := range items {
+		items[index] = LinkInspectionItem{
+			Original: fmt.Sprintf("item-%02d", index),
+			ASIN:     fmt.Sprintf("B%09d", index),
+		}
+	}
+
+	var active int32
+	var maximum int32
+	responses := inspectASINItems(
+		context.Background(),
+		items,
+		3,
+		func(_ context.Context, item LinkInspectionItem) LinkInspectionResult {
+			current := atomic.AddInt32(&active, 1)
+			for {
+				observed := atomic.LoadInt32(&maximum)
+				if current <= observed || atomic.CompareAndSwapInt32(&maximum, observed, current) {
+					break
+				}
+			}
+			time.Sleep(15 * time.Millisecond)
+			atomic.AddInt32(&active, -1)
+			return LinkInspectionResult{Item: item, ASIN: item.ASIN, ActualASIN: item.ASIN}
+		},
+	)
+
+	if maximum != 3 {
+		t.Fatalf("maximum concurrency = %d, want 3", maximum)
+	}
+	for index, response := range responses {
+		if response.Input != items[index].Original {
+			t.Fatalf("response[%d].input = %q, want %q", index, response.Input, items[index].Original)
+		}
+	}
+}
+
+func TestInspectASINItemsStopsAfterContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	items := []LinkInspectionItem{{Original: "first"}, {Original: "second"}}
+	done := make(chan struct{})
+	go func() {
+		inspectASINItems(
+			ctx,
+			items,
+			2,
+			func(ctx context.Context, item LinkInspectionItem) LinkInspectionResult {
+				<-ctx.Done()
+				return LinkInspectionResult{Item: item, ErrorMessage: ctx.Err().Error()}
+			},
+		)
+		close(done)
+	}()
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("inspection workers did not stop after cancellation")
+	}
 }
 
 func TestBuildASINInspectionItems(t *testing.T) {

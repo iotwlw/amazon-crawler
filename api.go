@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	log "github.com/tengfei-xy/go-log"
@@ -18,7 +21,13 @@ const (
 	TASK_STATUS_FAILED    = 2 // 失败
 
 	inspectionSchemaVersion = "2.0"
+	defaultASINConcurrency  = 4
+	maxASINConcurrency      = 8
 )
+
+var inspectionCookieMu sync.Mutex
+
+type asinInspectFunc func(context.Context, LinkInspectionItem) LinkInspectionResult
 
 // APIResponse 统一响应结构
 type APIResponse struct {
@@ -223,7 +232,7 @@ func handleASINInspection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := app.get_cookie(); err != nil {
+	if err := loadInspectionCookie(); err != nil {
 		log.Warnf("获取 Cookie 失败: %v，将不使用 Cookie", err)
 	}
 
@@ -231,12 +240,17 @@ func handleASINInspection(w http.ResponseWriter, r *http.Request) {
 	if domain == "" {
 		domain = normalizeDomain(app.Domain)
 	}
-	inspector := NewLinkInspector("", domain, "")
-	responseItems := make([]ASINInspectionResponseItem, 0, len(items))
-	for i, item := range items {
-		log.Infof("ASIN巡检: %d/%d %s", i+1, len(items), item.Original)
-		result := inspector.inspectItem(item)
-		responseItems = append(responseItems, linkInspectionResultToAPIItem(result, time.Now().UTC().Format(time.RFC3339)))
+	responseItems := inspectASINItems(
+		r.Context(),
+		items,
+		asinInspectionConcurrency(),
+		func(ctx context.Context, item LinkInspectionItem) LinkInspectionResult {
+			inspector := NewLinkInspector("", domain, "")
+			return inspector.inspectItem(ctx, item)
+		},
+	)
+	if r.Context().Err() != nil {
+		return
 	}
 
 	writeJSON(w, http.StatusOK, APIResponse{
@@ -248,6 +262,103 @@ func handleASINInspection(w http.ResponseWriter, r *http.Request) {
 			Items: responseItems,
 		},
 	})
+}
+
+func asinInspectionConcurrency() int {
+	raw := strings.TrimSpace(os.Getenv("CRAWLER_ASIN_CONCURRENCY"))
+	if raw == "" {
+		return defaultASINConcurrency
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return defaultASINConcurrency
+	}
+	if value < 1 {
+		return 1
+	}
+	if value > maxASINConcurrency {
+		return maxASINConcurrency
+	}
+	return value
+}
+
+func inspectASINItems(
+	ctx context.Context,
+	items []LinkInspectionItem,
+	concurrency int,
+	inspect asinInspectFunc,
+) []ASINInspectionResponseItem {
+	if len(items) == 0 {
+		return []ASINInspectionResponseItem{}
+	}
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	if concurrency > len(items) {
+		concurrency = len(items)
+	}
+
+	responses := make([]ASINInspectionResponseItem, len(items))
+	jobs := make(chan int)
+	var workers sync.WaitGroup
+	workers.Add(concurrency)
+	for workerID := 0; workerID < concurrency; workerID++ {
+		go func() {
+			defer workers.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case index, ok := <-jobs:
+					if !ok {
+						return
+					}
+					item := items[index]
+					log.Infof("ASIN巡检: %d/%d %s", index+1, len(items), item.Original)
+					result := inspect(ctx, item)
+					responses[index] = linkInspectionResultToAPIItem(
+						result,
+						time.Now().UTC().Format(time.RFC3339),
+					)
+				}
+			}
+		}()
+	}
+
+	for index := range items {
+		select {
+		case <-ctx.Done():
+			close(jobs)
+			workers.Wait()
+			return responses
+		case jobs <- index:
+		}
+	}
+	close(jobs)
+	workers.Wait()
+	return responses
+}
+
+func loadInspectionCookie() error {
+	inspectionCookieMu.Lock()
+	defer inspectionCookieMu.Unlock()
+	_, err := app.get_cookie()
+	return err
+}
+
+func inspectionCookieSnapshot() string {
+	inspectionCookieMu.Lock()
+	defer inspectionCookieMu.Unlock()
+	return app.cookie
+}
+
+func refreshInspectionCookie(staleCookie string) error {
+	inspectionCookieMu.Lock()
+	defer inspectionCookieMu.Unlock()
+	if app.cookie != staleCookie {
+		return nil
+	}
+	return app.handleCookieInvalid()
 }
 
 func checkCrawlerToken(w http.ResponseWriter, r *http.Request) bool {

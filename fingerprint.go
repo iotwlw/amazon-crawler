@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -92,6 +93,7 @@ var fingerprintPool = []BrowserFingerprint{
 
 // 当前会话使用的指纹（每次启动随机选择一个，保持会话一致性）
 var currentFingerprint BrowserFingerprint
+var currentFingerprintMu sync.RWMutex
 
 func init() {
 	// 程序启动时随机选择一个指纹
@@ -101,11 +103,15 @@ func init() {
 
 // GetCurrentFingerprint 获取当前会话的指纹
 func GetCurrentFingerprint() BrowserFingerprint {
+	currentFingerprintMu.RLock()
+	defer currentFingerprintMu.RUnlock()
 	return currentFingerprint
 }
 
 // RotateFingerprint 轮换指纹（在 Cookie 切换时调用）
 func RotateFingerprint() {
+	currentFingerprintMu.Lock()
+	defer currentFingerprintMu.Unlock()
 	rand.Seed(time.Now().UnixNano())
 	currentFingerprint = fingerprintPool[rand.Intn(len(fingerprintPool))]
 }

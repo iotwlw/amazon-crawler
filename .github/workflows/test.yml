@@ -1,0 +1,37 @@
+name: Go 回归
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/test.yml"
+  pull_request:
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/test.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: 测试、竞态与静态检查
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.19"
+          cache: true
+
+      - name: 运行测试与竞态检测
+        run: go test -race -count=1 ./...
+
+      - name: 运行静态检查
+        run: go vet ./...

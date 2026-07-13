@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -175,7 +176,7 @@ func (s *LinkInspector) Run() error {
 	successCount := 0
 	for i, item := range items {
 		log.Infof("进度: %d/%d - 巡检: %s", i+1, len(items), item.Original)
-		result := s.inspectItem(item)
+		result := s.inspectItem(context.Background(), item)
 		if result.ErrorMessage == "" {
 			successCount++
 		} else {
@@ -202,7 +203,7 @@ func (s *LinkInspector) Run() error {
 	return nil
 }
 
-func (s *LinkInspector) inspectItem(item LinkInspectionItem) LinkInspectionResult {
+func (s *LinkInspector) inspectItem(ctx context.Context, item LinkInspectionItem) LinkInspectionResult {
 	result := LinkInspectionResult{
 		Item:                item,
 		ASIN:                item.ASIN,
@@ -216,7 +217,7 @@ func (s *LinkInspector) inspectItem(item LinkInspectionItem) LinkInspectionResul
 		DisplayDiscount:     " ",
 	}
 
-	page, err := s.fetchDocument(item)
+	page, err := s.fetchDocument(ctx, item)
 	if err != nil {
 		result.ErrorMessage = err.Error()
 		return result
@@ -227,7 +228,7 @@ func (s *LinkInspector) inspectItem(item LinkInspectionItem) LinkInspectionResul
 	return extracted
 }
 
-func (s *LinkInspector) fetchDocument(item LinkInspectionItem) (inspectionPage, error) {
+func (s *LinkInspector) fetchDocument(ctx context.Context, item LinkInspectionItem) (inspectionPage, error) {
 	fp := GetCurrentFingerprint()
 	robots, err := s.robotsForDomain(item.Domain)
 	if err != nil {
@@ -240,13 +241,14 @@ func (s *LinkInspector) fetchDocument(item LinkInspectionItem) (inspectionPage, 
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
 		client := get_client()
-		req, err := http.NewRequest("GET", item.URL, nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", item.URL, nil)
 		if err != nil {
 			return inspectionPage{}, err
 		}
 		ApplyFingerprint(req, GetRandomReferer(item.Domain))
-		if app.cookie != "" {
-			req.Header.Set("Cookie", app.cookie)
+		cookie := inspectionCookieSnapshot()
+		if cookie != "" {
+			req.Header.Set("Cookie", cookie)
 		}
 
 		resp, err := client.Do(req)
@@ -267,7 +269,7 @@ func (s *LinkInspector) fetchDocument(item LinkInspectionItem) (inspectionPage, 
 		if isVerificationDocument(doc) {
 			lastErr = ERROR_VERIFICATION
 			if attempt == 0 {
-				if err := app.handleCookieInvalid(); err != nil {
+				if err := refreshInspectionCookie(cookie); err != nil {
 					log.Errorf("切换 Cookie 失败: %v", err)
 					return inspectionPage{}, lastErr
 				}

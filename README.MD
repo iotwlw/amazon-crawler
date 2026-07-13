@@ -139,8 +139,11 @@ go run . -c config.yaml -serve :8080
 LingxingAPI 只需要调用 `/api/asin-inspection` 实时巡检接口，推荐使用 API-only 模式，避免同时启动旧的关键词任务消费者：
 
 ```bash
+export CRAWLER_ASIN_CONCURRENCY=4
 go run . -c config.yaml -serve 127.0.0.1:8080 -serve-only
 ```
+
+`CRAWLER_ASIN_CONCURRENCY` 控制单个 ASIN 巡检请求的 worker 数，默认 `4`，最小 `1`，硬上限 `8`。响应仍按输入顺序返回。客户端断开或请求取消时，取消信号会继续传递到正在执行的 Amazon HTTP 请求。
 
 ### API 接口
 
