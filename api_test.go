@@ -8,6 +8,34 @@ import (
 	"testing"
 )
 
+func TestHealthIdentifiesInspectionServiceAndContract(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rr := httptest.NewRecorder()
+
+	handleHealth(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	var response APIResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != 0 {
+		t.Fatalf("code = %d, want 0", response.Code)
+	}
+	assertEqual(t, "inspection schema version", response.InspectionSchemaVersion, "2.0")
+	data, ok := response.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("data type = %T", response.Data)
+	}
+	service, ok := data["service"].(string)
+	if !ok {
+		t.Fatalf("service type = %T", data["service"])
+	}
+	assertEqual(t, "service", service, "amazon-crawler")
+}
+
 func TestBuildASINInspectionItems(t *testing.T) {
 	req := ASINInspectionRequest{
 		Domain: "www.amazon.com.mx",

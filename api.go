@@ -411,8 +411,12 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, http.StatusOK, APIResponse{
-		Code:    0,
-		Message: "ok",
+		Code:                    0,
+		Message:                 "ok",
+		InspectionSchemaVersion: inspectionSchemaVersion,
+		Data: map[string]interface{}{
+			"service": "amazon-crawler",
+		},
 	})
 }
 
