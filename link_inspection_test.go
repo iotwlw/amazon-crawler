@@ -256,6 +256,13 @@ func TestExtractInspectionContractStatuses(t *testing.T) {
 			wantAvailability: availabilityStatusUnknown,
 			wantOffer:        featuredOfferStatusUnknown,
 		},
+		{
+			name:             "price alone does not imply availability",
+			html:             `<html><body><div id="corePrice_feature_div"><span class="a-offscreen">$199.99</span></div></body></html>`,
+			wantPrice:        "$199.99",
+			wantAvailability: availabilityStatusUnknown,
+			wantOffer:        featuredOfferStatusUnknown,
+		},
 	}
 
 	for _, tc := range cases {
@@ -321,6 +328,190 @@ func TestUnavailablePageWithPriceAndBuyboxIsNotFeaturedOfferPresent(t *testing.T
 	assertEqual(t, "legacy price remains unchanged", result.Price, "$199.99")
 	assertEqual(t, "availability", result.AvailabilityStatus, availabilityStatusUnavailable)
 	assertEqual(t, "featured offer", result.FeaturedOfferStatus, featuredOfferStatusUnknown)
+	assertEqual(t, "seller id", result.SellerID, "")
+	assertEqual(t, "seller name", result.SellerName, "")
+}
+
+func TestUnrelatedQuickViewUnavailableIsIgnored(t *testing.T) {
+	html := `<html><body>
+	  <span id="productTitle">Current product without commerce modules</span>
+	  <div id="corePrice_feature_div"><span class="a-offscreen">$187.99</span></div>
+	  <div id="productQuickView_feature_div">
+	    <div id="a-popover-pqvOverlay" class="a-popover-preload">
+	      <div id="pqv-newer-version">
+	        <div id="availability"><p>Currently unavailable.</p></div>
+	        <a id="sellerProfileTriggerId" href="/sp?seller=A1QUICKVIEW">Other seller</a>
+	        <input id="add-to-cart-button" name="submit.add-to-cart"/>
+	        <input id="buy-now-button" name="submit.buy-now"/>
+	      </div>
+	    </div>
+	  </div>
+	</body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := LinkInspectionItem{
+		Original: "B0B87GXWLM",
+		URL:      "https://www.amazon.com/dp/B0B87GXWLM",
+		ASIN:     "B0B87GXWLM",
+		Domain:   "www.amazon.com",
+	}
+
+	result := extractLinkInspectionFields(doc, item)
+	assertEqual(t, "price", result.Price, "$187.99")
+	assertEqual(t, "availability", result.AvailabilityStatus, availabilityStatusUnknown)
+	assertEqual(t, "featured offer", result.FeaturedOfferStatus, featuredOfferStatusUnknown)
+	assertEqual(t, "seller id", result.SellerID, "")
+	assertEqual(t, "seller name", result.SellerName, "")
+}
+
+func TestUnrelatedQuickViewUnavailableDoesNotBackfillLegacyPrice(t *testing.T) {
+	html := `<html><body>
+	  <span id="productTitle">Current product without commerce modules</span>
+	  <div id="productQuickView_feature_div">
+	    <div id="a-popover-pqvOverlay" class="a-popover-preload">
+	      <div id="pqv-newer-version"><div id="availability">Currently unavailable.</div></div>
+	    </div>
+	  </div>
+	</body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := LinkInspectionItem{
+		Original: "B0B87GXWLM",
+		URL:      "https://www.amazon.com/dp/B0B87GXWLM",
+		ASIN:     "B0B87GXWLM",
+		Domain:   "www.amazon.com",
+	}
+
+	result := extractLinkInspectionFields(doc, item)
+	assertEqual(t, "price", result.Price, "")
+	assertEqual(t, "availability", result.AvailabilityStatus, availabilityStatusUnknown)
+}
+
+func TestConfirmedFeaturedOfferWinsConflictingAvailabilityEvidence(t *testing.T) {
+	for _, asin := range []string{"B0B87GXWLM", "B0BCL4SH3W"} {
+		t.Run(asin, func(t *testing.T) {
+			html := `<html><body>
+			  <input id="ASIN" value="` + asin + `"/>
+			  <div id="corePrice_feature_div"><span class="a-offscreen">$187.99</span></div>
+			  <div id="desktop_buybox">
+			    <div id="desktop_qualifiedBuyBox">
+			      <div id="availabilityInsideBuyBox_feature_div">
+			        <div id="availability">Only 7 left in stock - order soon.</div>
+			      </div>
+			      <div id="merchantInfoFeature_feature_div">
+			        <span>Ships from Amazon.com</span>
+			        <span>Sold by <a id="sellerProfileTriggerId" href="/gp/help/seller/at-a-glance.html?ie=UTF8&amp;seller=A31LEUCZ131Y7E&amp;isAmazonFulfilled=1">Lightdot</a></span>
+			      </div>
+			      <form id="addToCart">
+			        <input id="merchantID" value="A31LEUCZ131Y7E"/>
+			        <input id="add-to-cart-button" name="submit.add-to-cart"/>
+			      </form>
+			      <input id="buy-now-button" name="submit.buy-now"/>
+			      <div id="outOfStock">Currently unavailable.</div>
+			    </div>
+			  </div>
+			</body></html>`
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+			if err != nil {
+				t.Fatal(err)
+			}
+			item := LinkInspectionItem{
+				Original: asin,
+				URL:      "https://www.amazon.com/dp/" + asin,
+				ASIN:     asin,
+				Domain:   "www.amazon.com",
+			}
+
+			result := extractLinkInspectionFields(doc, item)
+			assertEqual(t, "price", result.Price, "$187.99")
+			assertEqual(t, "availability", result.AvailabilityStatus, availabilityStatusAvailable)
+			assertEqual(t, "featured offer", result.FeaturedOfferStatus, featuredOfferStatusPresent)
+			assertEqual(t, "seller id", result.SellerID, "A31LEUCZ131Y7E")
+			assertEqual(t, "seller name", result.SellerName, "Lightdot")
+		})
+	}
+}
+
+func TestHiddenUsedAccordionDoesNotOverrideFeaturedOffer(t *testing.T) {
+	html := `<html><body>
+	  <input id="ASIN" value="B0BCL4SH3W"/>
+	  <div id="corePrice_feature_div"><span class="a-offscreen">$257.99</span></div>
+	  <div id="desktop_buybox">
+	    <div id="usedAccordionRow">
+	      <div id="availability">Only 1 left in stock - order soon.</div>
+	      <a id="sellerProfileTriggerId" href="/sp?seller=A1USEDSELLER">Used Seller</a>
+	      <input id="merchantID" value="A1USEDSELLER"/>
+	      <input id="add-to-cart-button" name="submit.add-to-cart"/>
+	    </div>
+	    <div id="newAccordionRow_0">
+	      <div id="desktop_qualifiedBuyBox">
+	        <div id="availability">In Stock</div>
+	        <div id="offerDisplayFeatures_desktop">
+	          <div id="fulfillerInfoFeature_feature_div"><span>Ships from Amazon</span></div>
+	          <div id="merchantInfoFeature_feature_div">
+	            <span>Sold by <a id="sellerProfileTriggerId" href="/sp?seller=A31LEUCZ131Y7E">Lightdot</a></span>
+	          </div>
+	        </div>
+	        <form id="addToCart">
+	          <input id="merchantID" value="A31LEUCZ131Y7E"/>
+	          <input id="add-to-cart-button" name="submit.add-to-cart"/>
+	        </form>
+	        <input id="buy-now-button" name="submit.buy-now"/>
+	      </div>
+	    </div>
+	  </div>
+	</body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := LinkInspectionItem{
+		Original: "B0BCL4SH3W",
+		URL:      "https://www.amazon.com/dp/B0BCL4SH3W",
+		ASIN:     "B0BCL4SH3W",
+		Domain:   "www.amazon.com",
+	}
+
+	result := extractLinkInspectionFields(doc, item)
+	assertEqual(t, "availability", result.AvailabilityStatus, availabilityStatusAvailable)
+	assertEqual(t, "featured offer", result.FeaturedOfferStatus, featuredOfferStatusPresent)
+	assertEqual(t, "seller id", result.SellerID, "A31LEUCZ131Y7E")
+	assertEqual(t, "seller name", result.SellerName, "Lightdot")
+	if strings.Contains(result.FeaturedOfferText, "Used Seller") {
+		t.Fatalf("featured offer text included hidden used seller: %q", result.FeaturedOfferText)
+	}
+}
+
+func TestUsedAccordionOnlyIsUsedOffer(t *testing.T) {
+	html := `<html><body>
+	  <div id="desktop_buybox">
+	    <div id="usedAccordionRow">
+	      <span>No featured offers available</span>
+	      <span>Condition: Used - Like New</span>
+	      <a id="sellerProfileTriggerId" href="/sp?seller=A1USEDSELLER">Amazon Resale</a>
+	      <input id="merchantID" value="A1USEDSELLER"/>
+	      <input id="add-to-cart-button" name="submit.add-to-cart"/>
+	    </div>
+	  </div>
+	</body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := LinkInspectionItem{
+		Original: "B0BCL4SH3W",
+		URL:      "https://www.amazon.com/dp/B0BCL4SH3W",
+		ASIN:     "B0BCL4SH3W",
+		Domain:   "www.amazon.com",
+	}
+
+	result := extractLinkInspectionFields(doc, item)
+	assertEqual(t, "availability", result.AvailabilityStatus, availabilityStatusAvailable)
+	assertEqual(t, "featured offer", result.FeaturedOfferStatus, featuredOfferStatusUsedOnly)
 	assertEqual(t, "seller id", result.SellerID, "")
 	assertEqual(t, "seller name", result.SellerName, "")
 }

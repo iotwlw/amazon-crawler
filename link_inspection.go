@@ -85,8 +85,10 @@ const (
 	featuredOfferStatusUsedOnly = "used_only"
 	featuredOfferStatusUnknown  = "unknown"
 
-	variantPriceStatus         = "不可售-变体"
-	usedOfferContainerSelector = "#usedBuyBox, #usedBuyBox_feature_div"
+	variantPriceStatus                = "不可售-变体"
+	usedOfferContainerSelector        = "#usedBuyBox, #usedBuyBox_feature_div, #usedAccordionRow"
+	unrelatedOfferContainerSelector   = "#productQuickView_feature_div, #a-popover-pqvOverlay"
+	nonFeaturedOfferContainerSelector = usedOfferContainerSelector + ", " + unrelatedOfferContainerSelector
 )
 
 // LinkInspector implements the EasySpider-compatible product link inspection mode.
@@ -417,7 +419,7 @@ func extractInspectionContractFields(doc *goquery.Document, item LinkInspectionI
 
 	priceValue, currency := extractStructuredPrice(currentPrice, item.Domain)
 	return inspectionContractFields{
-		AvailabilityStatus:  extractAvailabilityStatus(doc, currentPrice, featuredOfferStatus),
+		AvailabilityStatus:  extractAvailabilityStatus(doc, featuredOfferStatus),
 		FeaturedOfferStatus: featuredOfferStatus,
 		FeaturedOfferText:   featuredOfferText,
 		SellerID:            sellerID,
@@ -436,7 +438,13 @@ func extractFeaturedOfferState(doc *goquery.Document, currentPrice, sellerID, se
 		"no featured offers available",
 		"no featured offer available",
 	}
-	missingEvidence := evidenceTextContainingAny(doc, featuredOfferEvidenceSelectors, missingPhrases, 800)
+	missingEvidence := scopedEvidenceTextContainingAny(
+		doc,
+		featuredOfferEvidenceSelectors,
+		missingPhrases,
+		800,
+		nonFeaturedOfferContainerSelector,
+	)
 
 	usedPhrases := []string{
 		"buy used",
@@ -445,7 +453,13 @@ func extractFeaturedOfferState(doc *goquery.Document, currentPrice, sellerID, se
 		"sold by amazon resale",
 		"pre-owned",
 	}
-	usedEvidence := evidenceTextContainingAny(doc, featuredOfferEvidenceSelectors, usedPhrases, 800)
+	usedEvidence := scopedEvidenceTextContainingAny(
+		doc,
+		featuredOfferEvidenceSelectors,
+		usedPhrases,
+		800,
+		unrelatedOfferContainerSelector,
+	)
 	hasPresentSignal := hasFeaturedOfferSignal(doc, currentPrice, sellerID, sellerName)
 	if usedEvidence != "" && !hasPresentSignal {
 		return featuredOfferStatusUsedOnly, usedEvidence
@@ -453,11 +467,11 @@ func extractFeaturedOfferState(doc *goquery.Document, currentPrice, sellerID, se
 	if missingEvidence != "" {
 		return featuredOfferStatusMissing, missingEvidence
 	}
-	if extractUnavailableEvidence(doc) != "" {
-		return featuredOfferStatusUnknown, ""
-	}
 	if hasPresentSignal {
 		return featuredOfferStatusPresent, buildFeaturedOfferEvidence(doc, currentPrice, sellerName)
+	}
+	if extractUnavailableEvidence(doc) != "" {
+		return featuredOfferStatusUnknown, ""
 	}
 	if usedEvidence != "" {
 		return featuredOfferStatusUsedOnly, usedEvidence
@@ -479,6 +493,7 @@ func extractPrimaryUsedOnlyEvidence(doc *goquery.Document, currentPrice, sellerI
 	if evidence := selectionEvidenceContainingAny(doc, []string{
 		"#usedBuyBox",
 		"#usedBuyBox_feature_div",
+		"#usedAccordionRow",
 	}, dedicatedUsedPhrases, 800); evidence != "" && !hasFeaturedOfferSignal(doc, currentPrice, sellerID, sellerName) {
 		return evidence
 	}
@@ -496,15 +511,14 @@ func extractPrimaryUsedOnlyEvidence(doc *goquery.Document, currentPrice, sellerI
 	}, primaryConditionPhrases, 800, usedOfferContainerSelector)
 }
 
-func extractAvailabilityStatus(doc *goquery.Document, currentPrice, featuredOfferStatus string) string {
-	if extractUnavailableEvidence(doc) != "" {
-		return availabilityStatusUnavailable
-	}
-
+func extractAvailabilityStatus(doc *goquery.Document, featuredOfferStatus string) string {
 	if featuredOfferStatus == featuredOfferStatusPresent || featuredOfferStatus == featuredOfferStatusUsedOnly {
 		return availabilityStatusAvailable
 	}
-	if strings.TrimSpace(currentPrice) != "" || hasPurchaseControl(doc) {
+	if extractUnavailableEvidence(doc) != "" {
+		return availabilityStatusUnavailable
+	}
+	if hasFeaturedOfferPurchaseControl(doc) {
 		return availabilityStatusAvailable
 	}
 
@@ -514,7 +528,13 @@ func extractAvailabilityStatus(doc *goquery.Document, currentPrice, featuredOffe
 		"available to ship",
 		"see all buying options",
 	}
-	if evidenceTextContainingAny(doc, availabilityEvidenceSelectors, availablePhrases, 800) != "" {
+	if scopedEvidenceTextContainingAny(
+		doc,
+		availabilityEvidenceSelectors,
+		availablePhrases,
+		800,
+		nonFeaturedOfferContainerSelector,
+	) != "" {
 		return availabilityStatusAvailable
 	}
 
@@ -522,16 +542,22 @@ func extractAvailabilityStatus(doc *goquery.Document, currentPrice, featuredOffe
 }
 
 func extractUnavailableEvidence(doc *goquery.Document) string {
-	return evidenceTextContainingAny(doc, availabilityEvidenceSelectors, []string{
-		"currently unavailable",
-		"we don't know when or if this item will be back in stock",
-		"temporarily out of stock",
-		"not available for purchase",
-	}, 800)
+	return scopedEvidenceTextContainingAny(
+		doc,
+		availabilityEvidenceSelectors,
+		[]string{
+			"currently unavailable",
+			"we don't know when or if this item will be back in stock",
+			"temporarily out of stock",
+			"not available for purchase",
+		},
+		800,
+		nonFeaturedOfferContainerSelector,
+	)
 }
 
 func hasFeaturedOfferSignal(doc *goquery.Document, currentPrice, sellerID, sellerName string) bool {
-	if hasPurchaseControlOutsideUsedOffer(doc) {
+	if hasFeaturedOfferPurchaseControl(doc) {
 		return true
 	}
 	if strings.TrimSpace(currentPrice) == "" {
@@ -540,15 +566,11 @@ func hasFeaturedOfferSignal(doc *goquery.Document, currentPrice, sellerID, selle
 	return sellerID != "" || sellerName != ""
 }
 
-func hasPurchaseControl(doc *goquery.Document) bool {
-	return hasAnySelection(doc, purchaseControlSelectors())
-}
-
-func hasPurchaseControlOutsideUsedOffer(doc *goquery.Document) bool {
+func hasFeaturedOfferPurchaseControl(doc *goquery.Document) bool {
 	for _, selector := range purchaseControlSelectors() {
 		found := false
 		doc.Find(selector).EachWithBreak(func(_ int, selection *goquery.Selection) bool {
-			if selectionInsideUsedOffer(selection) {
+			if selectionInsideContainer(selection, nonFeaturedOfferContainerSelector) {
 				return true
 			}
 			found = true
@@ -571,22 +593,20 @@ func purchaseControlSelectors() []string {
 	}
 }
 
-func hasAnySelection(doc *goquery.Document, selectors []string) bool {
+func scopedEvidenceTextContainingAny(
+	doc *goquery.Document,
+	selectors, phrases []string,
+	maxLen int,
+	excludedSelector string,
+) string {
+	best := ""
 	for _, selector := range selectors {
-		if doc.Find(selector).Length() > 0 {
-			return true
-		}
-	}
-	return false
-}
-
-func evidenceTextContainingAny(doc *goquery.Document, selectors, phrases []string, maxLen int) string {
-	best := selectionEvidenceContainingAny(doc, selectors, phrases, maxLen)
-	fallback := selectionEvidenceContainingAny(doc, []string{
-		"div, section, aside, table, tr, td, li, p, span",
-	}, phrases, maxLen)
-	if fallback != "" && (best == "" || len(fallback) < len(best)) {
-		best = fallback
+		doc.Find(selector).Each(func(_ int, selection *goquery.Selection) {
+			best = shorterEvidenceTextExcluding(best, selection, phrases, maxLen, excludedSelector)
+			selection.Find("div, section, aside, table, tr, td, li, p, span").Each(func(_ int, descendant *goquery.Selection) {
+				best = shorterEvidenceTextExcluding(best, descendant, phrases, maxLen, excludedSelector)
+			})
+		})
 	}
 	return best
 }
@@ -595,16 +615,40 @@ func selectionEvidenceContainingAny(doc *goquery.Document, selectors, phrases []
 	best := ""
 	for _, selector := range selectors {
 		doc.Find(selector).Each(func(_ int, selection *goquery.Selection) {
-			text := selectionTextWithoutScripts(selection)
-			if text == "" || (maxLen > 0 && len(text) > maxLen) || !containsAnyPhrase(text, phrases) {
-				return
-			}
-			if best == "" || len(text) < len(best) {
-				best = text
-			}
+			best = shorterEvidenceText(best, selection, phrases, maxLen)
 		})
 	}
 	return best
+}
+
+func shorterEvidenceText(best string, selection *goquery.Selection, phrases []string, maxLen int) string {
+	text := selectionTextWithoutScripts(selection)
+	if text == "" || (maxLen > 0 && len(text) > maxLen) || !containsAnyPhrase(text, phrases) {
+		return best
+	}
+	if best == "" || len(text) < len(best) {
+		return text
+	}
+	return best
+}
+
+func shorterEvidenceTextExcluding(
+	best string,
+	selection *goquery.Selection,
+	phrases []string,
+	maxLen int,
+	excludedSelector string,
+) string {
+	if selectionInsideContainer(selection, excludedSelector) {
+		return best
+	}
+	if excludedSelector == "" || selection.Find(excludedSelector).Length() == 0 {
+		return shorterEvidenceText(best, selection, phrases, maxLen)
+	}
+
+	clone := selection.Clone()
+	clone.Find(excludedSelector).Remove()
+	return shorterEvidenceText(best, clone, phrases, maxLen)
 }
 
 func selectionEvidenceContainingAnyExcluding(
@@ -644,11 +688,14 @@ func containsAnyPhrase(text string, phrases []string) bool {
 func buildFeaturedOfferEvidence(doc *goquery.Document, currentPrice, sellerName string) string {
 	parts := make([]string, 0, 4)
 	parts = appendEvidencePart(parts, currentPrice)
-	parts = appendEvidencePart(parts, textBySelectors(doc, []string{
+	parts = appendEvidencePart(parts, textByFeaturedOfferSelectors(doc, []string{
 		"#availabilityInsideBuyBox_feature_div",
 		"#availability",
 	}))
-	parts = appendEvidencePart(parts, textBySelectors(doc, []string{
+	parts = appendEvidencePart(parts, textByFeaturedOfferSelectors(doc, []string{
+		"#offerDisplayFeatures_desktop",
+		"#merchantInfoFeature_feature_div",
+		"#fulfillerInfoFeature_feature_div",
 		"#merchant-info",
 		"#tabular-buybox",
 		"#tabular-buybox-truncate-1",
@@ -687,7 +734,7 @@ func extractFeaturedOfferSeller(doc *goquery.Document) (string, string) {
 	}
 	for _, selector := range selectors {
 		doc.Find(selector).EachWithBreak(func(_ int, selection *goquery.Selection) bool {
-			if selectionInsideUsedOffer(selection) {
+			if selectionInsideContainer(selection, nonFeaturedOfferContainerSelector) {
 				return true
 			}
 			name := cleanText(selection.Text())
@@ -710,7 +757,7 @@ func extractFeaturedOfferSeller(doc *goquery.Document) (string, string) {
 	}
 
 	if sellerID == "" {
-		sellerID = cleanText(attrBySelectorsOutsideUsedOffer(doc, []string{
+		sellerID = cleanText(attrByFeaturedOfferSelectors(doc, []string{
 			"input#merchantID",
 			"input[name=\"merchantID\"]",
 			"input[name=\"merchantId\"]",
@@ -718,7 +765,7 @@ func extractFeaturedOfferSeller(doc *goquery.Document) (string, string) {
 		}, "value"))
 	}
 	if sellerName == "" {
-		sellerName = textBySelectorsOutsideUsedOffer(doc, []string{
+		sellerName = textByFeaturedOfferSelectors(doc, []string{
 			"#sellerProfileTriggerId",
 			"#vse-seller-link",
 			"#tabular-buybox-truncate-1 .tabular-buybox-text",
@@ -726,8 +773,9 @@ func extractFeaturedOfferSeller(doc *goquery.Document) (string, string) {
 		})
 	}
 	if sellerName == "" {
-		sellerName = extractSellerNameFromMerchantText(textBySelectorsOutsideUsedOffer(doc, []string{
+		sellerName = extractSellerNameFromMerchantText(textByFeaturedOfferSelectors(doc, []string{
 			"#merchant-info",
+			"#merchantInfoFeature_feature_div",
 			"#tabular-buybox",
 			"#tabular-buybox-container",
 		}))
@@ -735,16 +783,15 @@ func extractFeaturedOfferSeller(doc *goquery.Document) (string, string) {
 	return sellerID, sellerName
 }
 
-func selectionInsideUsedOffer(selection *goquery.Selection) bool {
-	return selection.Is(usedOfferContainerSelector) ||
-		selection.ParentsFiltered(usedOfferContainerSelector).Length() > 0
+func selectionInsideContainer(selection *goquery.Selection, selector string) bool {
+	return selector != "" && (selection.Is(selector) || selection.ParentsFiltered(selector).Length() > 0)
 }
 
-func attrBySelectorsOutsideUsedOffer(doc *goquery.Document, selectors []string, attrName string) string {
+func attrByFeaturedOfferSelectors(doc *goquery.Document, selectors []string, attrName string) string {
 	for _, selector := range selectors {
 		value := ""
 		doc.Find(selector).EachWithBreak(func(_ int, selection *goquery.Selection) bool {
-			if selectionInsideUsedOffer(selection) {
+			if selectionInsideContainer(selection, nonFeaturedOfferContainerSelector) {
 				return true
 			}
 			if candidate, ok := selection.Attr(attrName); ok {
@@ -760,11 +807,11 @@ func attrBySelectorsOutsideUsedOffer(doc *goquery.Document, selectors []string, 
 	return ""
 }
 
-func textBySelectorsOutsideUsedOffer(doc *goquery.Document, selectors []string) string {
+func textByFeaturedOfferSelectors(doc *goquery.Document, selectors []string) string {
 	for _, selector := range selectors {
 		value := ""
 		doc.Find(selector).EachWithBreak(func(_ int, selection *goquery.Selection) bool {
-			if selectionInsideUsedOffer(selection) {
+			if selectionInsideContainer(selection, nonFeaturedOfferContainerSelector) {
 				return true
 			}
 			value = cleanText(selection.Text())
@@ -1244,7 +1291,10 @@ func extractPriceStatusValue(doc *goquery.Document) string {
 		"[id*=\"Offer\"]",
 	}
 	for _, selector := range selectors {
-		if value := firstPriceStatusFromSelection(doc.Find(selector)); value != "" {
+		if value := firstPriceStatusFromSelectionExcluding(
+			doc.Find(selector),
+			unrelatedOfferContainerSelector,
+		); value != "" {
 			return value
 		}
 	}
@@ -1252,9 +1302,23 @@ func extractPriceStatusValue(doc *goquery.Document) string {
 }
 
 func firstPriceStatusFromSelection(selection *goquery.Selection) string {
+	return firstPriceStatusFromSelectionExcluding(selection, "")
+}
+
+func firstPriceStatusFromSelectionExcluding(selection *goquery.Selection, excludedSelector string) string {
 	var value string
 	selection.EachWithBreak(func(_ int, s *goquery.Selection) bool {
-		value = priceStatusFromText(selectionTextWithoutScripts(s))
+		if selectionInsideContainer(s, excludedSelector) {
+			return true
+		}
+		if excludedSelector == "" || s.Find(excludedSelector).Length() == 0 {
+			value = priceStatusFromText(selectionTextWithoutScripts(s))
+			return value == ""
+		}
+
+		clone := s.Clone()
+		clone.Find(excludedSelector).Remove()
+		value = priceStatusFromText(selectionTextWithoutScripts(clone))
 		return value == ""
 	})
 	return value
