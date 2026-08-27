@@ -32,6 +32,8 @@ var (
 	firstNumberRe          = regexp.MustCompile(`\d+`)
 	decimalNumberRe        = regexp.MustCompile(`\d+(?:\.\d+)?`)
 	soldByNameRe           = regexp.MustCompile(`(?i)\bsold by\s+(.+?)(?:\s+(?:ships from|(?:and\s+)?fulfilled by|returns|payment|secure transaction)\b|$)`)
+	parentASINJSONRe       = regexp.MustCompile(`\\?"parentAsin\\?"\s*:\s*\\?"([A-Z0-9]{10})\\?"`)
+	twisterParentRefRe     = regexp.MustCompile(`(?i)ref=twister_([A-Z0-9]{10})`)
 
 	featuredOfferEvidenceSelectors = []string{
 		"#desktop_buybox",
@@ -72,6 +74,7 @@ var (
 		"Choice",
 		"Frequently returned item",
 		"Newer model",
+		"ParentASIN",
 	}
 )
 
@@ -112,6 +115,7 @@ type LinkInspectionResult struct {
 	Product             string
 	ASIN                string
 	ActualASIN          string
+	ParentASIN          string
 	FinalURL            string
 	Price               string
 	PriceValue          *float64
@@ -330,6 +334,7 @@ func extractLinkInspectionPageFields(doc *goquery.Document, item LinkInspectionI
 	}))
 
 	asin := extractActualASINValueWithFinalURL(doc, item, finalURL)
+	parentASIN := extractParentASINValue(doc, asin, item.ASIN)
 
 	rating := extractRatingValue(textBySelectors(doc, []string{
 		"#averageCustomerReviews span[aria-hidden=\"true\"]",
@@ -354,6 +359,7 @@ func extractLinkInspectionPageFields(doc *goquery.Document, item LinkInspectionI
 		Product:             textBySelectors(doc, []string{"#productTitle"}),
 		ASIN:                asin,
 		ActualASIN:          asin,
+		ParentASIN:          parentASIN,
 		FinalURL:            inspectionFinalURL(finalURL, item.URL),
 		Price:               price,
 		PriceValue:          contract.PriceValue,
@@ -401,6 +407,48 @@ func extractActualASINValueWithFinalURL(doc *goquery.Document, item LinkInspecti
 		return finalURLASIN
 	}
 	return item.ASIN
+}
+
+func extractParentASINValue(doc *goquery.Document, currentASINs ...string) string {
+	raw, err := goquery.OuterHtml(doc.Selection)
+	if err != nil {
+		return ""
+	}
+	current := make([]string, 0, len(currentASINs))
+	for _, value := range currentASINs {
+		if value = strings.ToUpper(strings.TrimSpace(value)); value != "" {
+			current = append(current, value)
+		}
+	}
+
+	text := html.UnescapeString(raw)
+	if value := firstForeignParentASIN(parentASINJSONRe.FindAllStringSubmatch(text, -1), current); value != "" {
+		return value
+	}
+	return firstForeignParentASIN(twisterParentRefRe.FindAllStringSubmatch(text, -1), current)
+}
+
+// firstForeignParentASIN returns the first captured ASIN that does not belong to
+// the inspected page itself. Standalone products embed a parentAsin equal to
+// their own ASIN in the media JSON, which counts as no merged parent.
+func firstForeignParentASIN(matches [][]string, currentASINs []string) string {
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		value := strings.ToUpper(match[1])
+		foreign := true
+		for _, known := range currentASINs {
+			if known == value {
+				foreign = false
+				break
+			}
+		}
+		if foreign {
+			return value
+		}
+	}
+	return ""
 }
 
 func isVariantASIN(originalASIN, actualASIN string) bool {
@@ -1631,6 +1679,7 @@ func inspectionRows(results []LinkInspectionResult) [][]string {
 			r.Choice,
 			r.FrequentReturn,
 			r.NewerModel,
+			r.ParentASIN,
 		})
 	}
 	return rows
@@ -1697,7 +1746,7 @@ func worksheetXML(rows [][]string) string {
 	builder.WriteString(`<sheetViews><sheetView workbookViewId="0"/></sheetViews>`)
 	builder.WriteString(`<sheetFormatPr defaultRowHeight="15"/>`)
 	builder.WriteString(`<cols>`)
-	widths := []float64{55, 36, 14, 12, 12, 12, 12, 12, 10, 12, 18, 18, 18, 55, 18, 32, 70}
+	widths := []float64{55, 36, 14, 12, 12, 12, 12, 12, 10, 12, 18, 18, 18, 55, 18, 32, 70, 14}
 	for i, width := range widths {
 		builder.WriteString(fmt.Sprintf(`<col min="%d" max="%d" width="%.2f" customWidth="1"/>`, i+1, i+1, width))
 	}

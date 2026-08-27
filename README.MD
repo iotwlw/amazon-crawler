@@ -219,6 +219,7 @@ curl -X POST http://localhost:8080/api/asin-inspection \
         "domain": "www.amazon.com",
         "original_asin": "B0FNMPQSJC",
         "asin": "B0FNMPQSJC",
+        "parent_asin": "",
         "status": "success",
         "product_title": "Product title",
         "price": "$29.99",
@@ -243,6 +244,7 @@ curl -X POST http://localhost:8080/api/asin-inspection \
 
 - 单次最多 50 条。
 - `asin` 字段是页面实际 ASIN；如果 Amazon 合并到变体页面，`original_asin` 会保留输入 ASIN。
+- `parent_asin` 是商品所属变体家族的父体 ASIN（取自页面内嵌 twister/media JSON）；未合并父体的独立商品该字段为空。链接巡检 xlsx 同样新增 `ParentASIN` 列。
 - 单项失败时，该项 `status` 为 `failed`，错误写入 `error_message`，不影响其他项返回。
 
 ### 数据库表变更

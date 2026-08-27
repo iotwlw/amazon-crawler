@@ -8,6 +8,7 @@ amazon-crawler
 
 # Output directory
 output/
+outputs/
 
 # Configurations (often contain sensitive info)
 config.yaml

@@ -40,6 +40,9 @@ func TestExtractLinkInspectionFields(t *testing.T) {
 <html>
 <body>
   <input id="ASIN" value="B0FNMPQSJC"/>
+  <script type="a-state">
+    var data = {"dataInJson":null,"mediaAsin":"B0FNMPQSJC","parentAsin":"B0PARENTA9"};
+  </script>
   <span id="productTitle"> Lightdot 320W LED Wall Pack Lights </span>
   <div id="corePrice_feature_div"><span class="a-offscreen">$199.99</span></div>
   <div id="corePriceDisplay_desktop_feature_div">
@@ -87,6 +90,7 @@ func TestExtractLinkInspectionFields(t *testing.T) {
 
 	assertEqual(t, "product", result.Product, "Lightdot 320W LED Wall Pack Lights")
 	assertEqual(t, "asin", result.ASIN, "B0FNMPQSJC")
+	assertEqual(t, "parent asin", result.ParentASIN, "B0PARENTA9")
 	assertEqual(t, "price", result.Price, "$199.99")
 	assertEqual(t, "coupon", result.Coupon, "10%")
 	assertEqual(t, "deal", result.IsDeal, "Deal")
@@ -103,6 +107,70 @@ func TestExtractLinkInspectionFields(t *testing.T) {
 	assertEqual(t, "choice", result.Choice, "Amazon's  Choice")
 	assertEqual(t, "frequently returned", result.FrequentReturn, "Frequently returned item Check the product details and customer reviews to learn more about this item.")
 	assertEqual(t, "newer model", result.NewerModel, "There is a newer model of this item: Lightdot 320W LED Parking Lot Light 80000Lumens 5000K LED Pole Lights Outdoor $369.99 Only 10 left in stock - order soon.")
+}
+
+func TestExtractParentASINValue(t *testing.T) {
+	childHTML := `
+<html>
+<body>
+  <input id="ASIN" value="B0FNMPQSJC"/>
+  <script type="a-state">
+    var dataToReturn = {
+      "twisterUpdateURLInfo" : {"immutableParams" : { "parentAsin": "B0PARENTA9", "ptd": "LIGHT_FIXTURE" }},
+      "currentAsin" : "B0FNMPQSJC",
+      "parentAsin" : "B0PARENTA9",
+      "variationValues" : {"wattage":["100.0 Watts"]}
+    };
+  </script>
+</body>
+</html>`
+
+	standaloneHTML := `
+<html>
+<body>
+  <input id="ASIN" value="B0SELFASIN"/>
+  <script type="a-state">
+    var data = {"mediaAsin":"B0SELFASIN","parentAsin":"B0SELFASIN"};
+  </script>
+  <div data-video-items="[{&quot;productAsin&quot;:&quot;B0SELFASIN&quot;,&quot;parentAsin&quot;:&quot;B0SELFASIN&quot;}]"></div>
+</body>
+</html>`
+
+	twisterRefHTML := `
+<html>
+<body>
+  <input id="ASIN" value="B0FNMPQSJC"/>
+  <a href="/dp/B0OTHER1234/ref=twister_B0PARENTB2?_encoding=UTF8&psc=1">Another option</a>
+</body>
+</html>`
+
+	emptyHTML := `
+<html>
+<body><span id="productTitle">Lightdot 320W LED Wall Pack Lights</span></body>
+</html>`
+
+	cases := []struct {
+		name       string
+		html       string
+		current    string
+		wantParent string
+	}{
+		{name: "child variant page reports merged parent", html: childHTML, current: "B0FNMPQSJC", wantParent: "B0PARENTA9"},
+		{name: "standalone page with self parent stays empty", html: standaloneHTML, current: "B0SELFASIN", wantParent: ""},
+		{name: "falls back to twister ref when json missing", html: twisterRefHTML, current: "B0FNMPQSJC", wantParent: "B0PARENTB2"},
+		{name: "no evidence yields empty", html: emptyHTML, current: "B0FNMPQSJC", wantParent: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(tc.html))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := extractParentASINValue(doc, tc.current, tc.current); got != tc.wantParent {
+				t.Fatalf("parent asin = %q, want %q", got, tc.wantParent)
+			}
+		})
+	}
 }
 
 func TestVariantMergedASINMarksPriceAndOriginalASIN(t *testing.T) {
@@ -821,12 +889,12 @@ func TestWriteInspectionXLSX(t *testing.T) {
 	if containsString(inspectionHeaders, "价格状态") {
 		t.Fatal("价格状态 column should not be present")
 	}
-	if inspectionHeaders[len(inspectionHeaders)-1] != "Newer model" {
-		t.Fatalf("last header = %q, want Newer model", inspectionHeaders[len(inspectionHeaders)-1])
+	if inspectionHeaders[len(inspectionHeaders)-1] != "ParentASIN" {
+		t.Fatalf("last header = %q, want ParentASIN", inspectionHeaders[len(inspectionHeaders)-1])
 	}
 	rows := [][]string{
 		inspectionHeaders,
-		{"Product", "https://www.amazon.com/dp/B0FNMPQSJC", "B0FNMPQSJC", "$199.99", "10%", " ", " ", "-32%", "4.3", "7", "", "", "", "", "Amazon's Choice", "Frequently returned item", "There is a newer model of this item: Product"},
+		{"Product", "https://www.amazon.com/dp/B0FNMPQSJC", "B0FNMPQSJC", "$199.99", "10%", " ", " ", "-32%", "4.3", "7", "", "", "", "", "Amazon's Choice", "Frequently returned item", "There is a newer model of this item: Product", "B0PARENTA9"},
 	}
 	if err := writeInspectionXLSX(out, rows); err != nil {
 		t.Fatal(err)

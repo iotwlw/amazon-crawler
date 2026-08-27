@@ -28,7 +28,7 @@ func TestHealthIdentifiesInspectionServiceAndContract(t *testing.T) {
 	if response.Code != 0 {
 		t.Fatalf("code = %d, want 0", response.Code)
 	}
-	assertEqual(t, "inspection schema version", response.InspectionSchemaVersion, "2.0")
+	assertEqual(t, "inspection schema version", response.InspectionSchemaVersion, "2.1")
 	data, ok := response.Data.(map[string]interface{})
 	if !ok {
 		t.Fatalf("data type = %T", response.Data)
@@ -171,6 +171,7 @@ func TestLinkInspectionResultToAPIItemIncludesOriginalAndActualASIN(t *testing.T
 		Product:             "Lightdot 2 Pack 150W Wall Pack LED Exterior Light",
 		ASIN:                "B0DKF7HNZX",
 		ActualASIN:          "B0DKF7HNZX",
+		ParentASIN:          "B0PARENTA9",
 		FinalURL:            "https://www.amazon.com/dp/B0DKF7HNZX",
 		Price:               variantPriceStatus,
 		PriceValue:          &priceValue,
@@ -193,6 +194,7 @@ func TestLinkInspectionResultToAPIItemIncludesOriginalAndActualASIN(t *testing.T
 	assertEqual(t, "original asin", apiItem.OriginalASIN, "B0B6FZ1R2L")
 	assertEqual(t, "actual asin", apiItem.ASIN, "B0DKF7HNZX")
 	assertEqual(t, "explicit actual asin", apiItem.ActualASIN, "B0DKF7HNZX")
+	assertEqual(t, "parent asin", apiItem.ParentASIN, "B0PARENTA9")
 	assertEqual(t, "final url", apiItem.FinalURL, "https://www.amazon.com/dp/B0DKF7HNZX")
 	assertEqual(t, "price", apiItem.Price, variantPriceStatus)
 	if apiItem.PriceValue == nil || *apiItem.PriceValue != 95.99 {
@@ -248,7 +250,7 @@ func TestASINInspectionResponseJSONV2Contract(t *testing.T) {
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatal(err)
 	}
-	assertEqual(t, "schema version", payload["inspection_schema_version"].(string), "2.0")
+	assertEqual(t, "schema version", payload["inspection_schema_version"].(string), "2.1")
 
 	data := payload["data"].(map[string]interface{})
 	if _, exists := data["inspection_schema_version"]; exists {
@@ -265,6 +267,7 @@ func TestASINInspectionResponseJSONV2Contract(t *testing.T) {
 		"seller_name":           "",
 		"currency":              "USD",
 		"actual_asin":           "B0FNMPQSJC",
+		"parent_asin":           "",
 		"final_url":             "https://www.amazon.com/dp/B0FNMPQSJC?th=1",
 		"price":                 "$199.99",
 	}

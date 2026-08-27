@@ -20,7 +20,7 @@ const (
 	TASK_STATUS_COMPLETED = 1 // 已执行
 	TASK_STATUS_FAILED    = 2 // 失败
 
-	inspectionSchemaVersion = "2.0"
+	inspectionSchemaVersion = "2.1"
 	defaultASINConcurrency  = 4
 	maxASINConcurrency      = 8
 )
@@ -80,6 +80,7 @@ type ASINInspectionResponseItem struct {
 	OriginalASIN        string   `json:"original_asin"`
 	ASIN                string   `json:"asin"`
 	ActualASIN          string   `json:"actual_asin"`
+	ParentASIN          string   `json:"parent_asin"`
 	Status              string   `json:"status"`
 	ProductTitle        string   `json:"product_title"`
 	Price               string   `json:"price"`
@@ -107,6 +108,43 @@ type ASINInspectionResponseItem struct {
 	CapturedAt          string   `json:"captured_at"`
 }
 
+type ProductImagesRequest struct {
+	JobID    string `json:"job_id"`
+	URL      string `json:"url"`
+	ASIN     string `json:"asin"`
+	Domain   string `json:"domain"`
+	Include  string `json:"include"`
+	MaxMain  int    `json:"max_main"`
+	MaxAPlus int    `json:"max_aplus"`
+}
+
+type ProductImagesResponseData struct {
+	JobID        string                       `json:"job_id,omitempty"`
+	Input        string                       `json:"input"`
+	URL          string                       `json:"url"`
+	Domain       string                       `json:"domain"`
+	OriginalASIN string                       `json:"original_asin"`
+	ASIN         string                       `json:"asin"`
+	ProductTitle string                       `json:"product_title"`
+	Discovered   ProductImagesDiscovered      `json:"discovered"`
+	Images       []ProductImagesResponseImage `json:"images"`
+}
+
+type ProductImagesDiscovered struct {
+	MainCandidates  int `json:"main_candidates"`
+	APlusCandidates int `json:"aplus_candidates"`
+}
+
+type ProductImagesResponseImage struct {
+	Role   string `json:"role"`
+	Index  int    `json:"index"`
+	URL    string `json:"url"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+	Source string `json:"source"`
+	Key    string `json:"key"`
+}
+
 // StartHTTPServer 启动 HTTP 服务
 func StartHTTPServer(addr string) {
 	mux := http.NewServeMux()
@@ -114,6 +152,7 @@ func StartHTTPServer(addr string) {
 	// 注册路由
 	mux.HandleFunc("/api/crawl", handleCrawl)
 	mux.HandleFunc("/api/asin-inspection", handleASINInspection)
+	mux.HandleFunc("/api/product-images", handleProductImages)
 	mux.HandleFunc("/api/status", handleStatus)
 	mux.HandleFunc("/health", handleHealth)
 
@@ -121,6 +160,7 @@ func StartHTTPServer(addr string) {
 	log.Infof("可用接口:")
 	log.Infof("  POST /api/crawl  - 提交爬取任务")
 	log.Infof("  POST /api/asin-inspection - ASIN/链接实时巡检")
+	log.Infof("  POST /api/product-images - 提取商品主图和 A+ 图片 URL")
 	log.Infof("  GET  /api/status - 查看任务状态")
 	log.Infof("  GET  /health     - 健康检查")
 
@@ -361,6 +401,76 @@ func refreshInspectionCookie(staleCookie string) error {
 	return app.handleCookieInvalid()
 }
 
+func handleProductImages(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if !checkCrawlerToken(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, APIResponse{
+			Code:    -1,
+			Message: "只支持 POST 方法",
+		})
+		return
+	}
+
+	var req ProductImagesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, APIResponse{
+			Code:    -1,
+			Message: fmt.Sprintf("请求解析失败: %v", err),
+		})
+		return
+	}
+
+	item, err := buildProductImagesItem(req)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, APIResponse{
+			Code:    -1,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	if _, err := app.get_cookie(); err != nil {
+		log.Warnf("获取 Cookie 失败: %v，将不使用 Cookie", err)
+	}
+
+	extractor := NewProductImageExtractor(item.Domain)
+	result, err := extractor.Extract(item, ProductImageExtractionOptions{
+		Include:  req.Include,
+		MaxMain:  req.MaxMain,
+		MaxAPlus: req.MaxAPlus,
+	})
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, APIResponse{
+			Code:    -1,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, APIResponse{
+		Code:    0,
+		Message: "ok",
+		Data: ProductImagesResponseData{
+			JobID:        req.JobID,
+			Input:        item.Original,
+			URL:          item.URL,
+			Domain:       item.Domain,
+			OriginalASIN: item.ASIN,
+			ASIN:         result.ASIN,
+			ProductTitle: result.ProductTitle,
+			Discovered: ProductImagesDiscovered{
+				MainCandidates:  result.MainCandidates,
+				APlusCandidates: result.APlusCandidates,
+			},
+			Images: productImageCandidatesToAPIImages(result.Images),
+		},
+	})
+}
+
 func checkCrawlerToken(w http.ResponseWriter, r *http.Request) bool {
 	token := strings.TrimSpace(os.Getenv("CRAWLER_API_TOKEN"))
 	if token == "" {
@@ -422,6 +532,30 @@ func buildASINInspectionItems(req ASINInspectionRequest) ([]LinkInspectionItem, 
 	return items, nil
 }
 
+func buildProductImagesItem(req ProductImagesRequest) (LinkInspectionItem, error) {
+	raw := strings.TrimSpace(req.URL)
+	if raw == "" {
+		raw = strings.TrimSpace(req.ASIN)
+	}
+	if raw == "" {
+		return LinkInspectionItem{}, fmt.Errorf("缺少 asin 或 url")
+	}
+
+	defaultDomain := normalizeDomain(req.Domain)
+	if defaultDomain == "" {
+		defaultDomain = normalizeDomain(app.Domain)
+	}
+	if defaultDomain == "" {
+		defaultDomain = "www.amazon.com"
+	}
+
+	item, ok := parseLinkInspectionItem(raw, defaultDomain)
+	if !ok {
+		return LinkInspectionItem{}, fmt.Errorf("无法识别 ASIN 或商品链接: %s", raw)
+	}
+	return item, nil
+}
+
 func linkInspectionResultToAPIItem(result LinkInspectionResult, capturedAt string) ASINInspectionResponseItem {
 	status := "success"
 	if result.ErrorMessage != "" {
@@ -451,6 +585,7 @@ func linkInspectionResultToAPIItem(result LinkInspectionResult, capturedAt strin
 		OriginalASIN:        result.Item.ASIN,
 		ASIN:                result.ASIN,
 		ActualASIN:          actualASIN,
+		ParentASIN:          result.ParentASIN,
 		Status:              status,
 		ProductTitle:        result.Product,
 		Price:               result.Price,
@@ -477,6 +612,24 @@ func linkInspectionResultToAPIItem(result LinkInspectionResult, capturedAt strin
 		ErrorMessage:        result.ErrorMessage,
 		CapturedAt:          capturedAt,
 	}
+}
+
+func productImageCandidatesToAPIImages(images []ProductImageCandidate) []ProductImagesResponseImage {
+	items := make([]ProductImagesResponseImage, 0, len(images))
+	roleCounts := map[string]int{}
+	for _, image := range images {
+		roleCounts[image.Role]++
+		items = append(items, ProductImagesResponseImage{
+			Role:   image.Role,
+			Index:  roleCounts[image.Role],
+			URL:    image.URL,
+			Width:  image.Width,
+			Height: image.Height,
+			Source: image.Source,
+			Key:    image.Key,
+		})
+	}
+	return items
 }
 
 // insertKeywordTask 将关键词插入到 amc_category 表
